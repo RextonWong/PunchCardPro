@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
+import Analytics from './Analytics';
 
 // PostgreSQL TIME columns return "HH:MM:SS" — trim to "HH:MM" for <input type="time">
 const pgTime = (t) => (t ? t.slice(0, 5) : '');
@@ -444,6 +445,11 @@ function App() {
   const totalMonthlyFees = displayedEntries.reduce((sum, e) => sum + e.total, 0);
 
   // --- 7. RENDER ---
+  // Analytics page renders outside the main container so it controls its own layout
+  if (view === 'analytics') {
+    return <Analytics workplaces={workplaces} onBack={() => setView('home')} />;
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center">
@@ -601,7 +607,10 @@ function App() {
           <div>
             <div className="flex justify-between items-center mb-10 border-b pb-6">
               <h2 className="text-3xl font-bold tracking-tighter uppercase">Project Portfolio</h2>
-              <button onClick={() => setShowNewSiteForm(true)} className="bg-blue-600 text-white px-8 py-2 font-bold uppercase text-xs shadow-md">+ New Site</button>
+              <div className="flex gap-3">
+                <button onClick={() => setView('analytics')} className="border-2 border-slate-300 text-slate-600 px-8 py-2 font-bold uppercase text-xs hover:border-blue-600 hover:text-blue-600 transition-colors">Analytics</button>
+                <button onClick={() => setShowNewSiteForm(true)} className="bg-blue-600 text-white px-8 py-2 font-bold uppercase text-xs shadow-md">+ New Site</button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
