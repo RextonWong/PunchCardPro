@@ -155,7 +155,13 @@ function App() {
   // Optional `site` param lets callers pass a different config — used when
   // recalculating historical entries after a site settings change.
   const calculateDailyHours = (dateStr, timeIn, timeOut, isRainDay, site = activeSite) => {
-    if (!timeIn || !timeOut || !site) return { hours: 0, rest: 0, total: 0 };
+    if (!site) return { hours: 0, rest: 0, total: 0 };
+    // Rain day with no clock times: bill the guaranteed minimum hours with no rest deduction
+    if ((!timeIn || !timeOut) && isRainDay) {
+      const minH = parseFloat(site.rainMin);
+      return { hours: minH, rest: 0, total: minH * site.rate };
+    }
+    if (!timeIn || !timeOut) return { hours: 0, rest: 0, total: 0 };
 
     let cH = 0, restH = 0;
     // Day-of-week check: getDay() === 5 means Friday (Jumaat prayer rules apply)
@@ -199,19 +205,35 @@ function App() {
     };
 
     lines.forEach((line) => {
-      const dayMatch = line.match(/^([1-3][0-9]|[1-9])\b/);
+      const dayMatch   = line.match(/^([1-3][0-9]|[1-9])\b/);
       const timeMatches = [...line.matchAll(/(\d{1,2})\s*(am|pm)/g)];
-      if (dayMatch && timeMatches.length >= 2) {
-        const dayNumber = dayMatch[1].padStart(2, '0');
-        const fullDate = `${selMonth}-${dayNumber}`;
+      // Detect "rain" or "hujan" (Malay) anywhere on the line, case-insensitive
+      const isRainLine = /\b(rain|hujan)\b/i.test(line);
+
+      if (!dayMatch) return;
+
+      const dayNumber = dayMatch[1].padStart(2, '0');
+      const fullDate  = `${selMonth}-${dayNumber}`;
+
+      if (timeMatches.length >= 2) {
+        // Normal day with clock times — mark rain if keyword present on the line
         const firstTime = timeMatches[0];
-        const lastTime = timeMatches[timeMatches.length - 1];
+        const lastTime  = timeMatches[timeMatches.length - 1];
         newBatch.push({
           id: Date.now() + Math.random(),
           date: fullDate,
-          in: convertTo24H(firstTime[1], firstTime[2]),
-          out: convertTo24H(lastTime[1], lastTime[2]),
-          isRain: false,
+          in:   convertTo24H(firstTime[1], firstTime[2]),
+          out:  convertTo24H(lastTime[1],  lastTime[2]),
+          isRain: isRainLine,
+        });
+      } else if (isRainLine) {
+        // Rain day with no clock times — no in/out, rain minimum will apply on approval
+        newBatch.push({
+          id: Date.now() + Math.random(),
+          date: fullDate,
+          in:   '',
+          out:  '',
+          isRain: true,
         });
       }
     });
@@ -285,9 +307,10 @@ function App() {
 
     const fId = loriInput.toUpperCase().trim();
 
-    // Build database rows from the preview batch, skipping empty days
+    // Build database rows from the preview batch.
+    // Include rain days even with no times — rain minimum hours still apply.
     const rowsToInsert = previewBatch
-      .filter((day) => day.in.trim() !== '' || day.out.trim() !== '')
+      .filter((day) => day.in.trim() !== '' || day.out.trim() !== '' || day.isRain)
       .map((day) => {
         const math = calculateDailyHours(day.date, day.in, day.out, day.isRain);
         return {
