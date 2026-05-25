@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
 import Analytics from './Analytics';
+import Login from './Login';
 
 // PostgreSQL TIME columns return "HH:MM:SS" — trim to "HH:MM" for <input type="time">
 const pgTime = (t) => (t ? t.slice(0, 5) : '');
@@ -39,14 +40,34 @@ function App() {
   const [activeSiteId, setActiveSiteId] = useState(null);
   const [showNewSiteForm, setShowNewSiteForm] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-  // True while the initial Supabase load (or any reload) is in flight
   const [isLoading, setIsLoading] = useState(true);
   const fileInputRef = useRef(null);
 
   const [workplaces, setWorkplaces] = useState([]);
 
+  // session is null while checking auth, false when confirmed logged-out,
+  // or a Supabase session object when logged in
+  const [session, setSession] = useState(undefined);
+
+  useEffect(() => {
+    // Restore existing session on page load
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session ?? null);
+    });
+    // Keep session in sync whenever the user signs in or out
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Load data only once a valid session exists
+  useEffect(() => {
+    if (session) loadData();
+  }, [session]);
+
   // Fetch all workplaces and their entries from Supabase.
-  // Called once on mount and after every mutation so local state
+  // Called on session start and after every mutation so local state
   // always reflects the database exactly.
   const loadData = async () => {
     setIsLoading(true);
@@ -74,7 +95,6 @@ function App() {
     setIsLoading(false);
   };
 
-  useEffect(() => { loadData(); }, []);
 
   // --- 2. INPUT & UI STATE ---
   const [entryDate, setEntryDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -445,6 +465,18 @@ function App() {
   const totalMonthlyFees = displayedEntries.reduce((sum, e) => sum + e.total, 0);
 
   // --- 7. RENDER ---
+  // Still waiting for Supabase to confirm session status
+  if (session === undefined) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <p className="font-bold uppercase text-slate-400 tracking-widest animate-pulse">Loading...</p>
+      </div>
+    );
+  }
+
+  // No session — show the login wall
+  if (!session) return <Login />;
+
   // Analytics page renders outside the main container so it controls its own layout
   if (view === 'analytics') {
     return <Analytics workplaces={workplaces} onBack={() => setView('home')} />;
@@ -607,9 +639,10 @@ function App() {
           <div>
             <div className="flex justify-between items-center mb-10 border-b pb-6">
               <h2 className="text-3xl font-bold tracking-tighter uppercase">Project Portfolio</h2>
-              <div className="flex gap-3">
+              <div className="flex gap-3 items-center">
                 <button onClick={() => setView('analytics')} className="border-2 border-slate-300 text-slate-600 px-8 py-2 font-bold uppercase text-xs hover:border-blue-600 hover:text-blue-600 transition-colors">Analytics</button>
                 <button onClick={() => setShowNewSiteForm(true)} className="bg-blue-600 text-white px-8 py-2 font-bold uppercase text-xs shadow-md">+ New Site</button>
+                <button onClick={() => supabase.auth.signOut()} className="text-slate-400 hover:text-red-500 font-bold uppercase text-xs tracking-widest transition-colors">Sign Out</button>
               </div>
             </div>
 
