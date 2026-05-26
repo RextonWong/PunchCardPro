@@ -1,3 +1,10 @@
+# Environment / secrets — never commit
+.env
+.env.*
+
+# Playwright screenshots (may contain PII)
+scripts/screenshots/
+
 # Logs
 logs
 *.log

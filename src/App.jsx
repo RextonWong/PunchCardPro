@@ -138,6 +138,7 @@ function App() {
   )].sort();
 
   useEffect(() => {
+    setEditingEntryId(null);
     if (lorisInMonth.length > 0) {
       if (!activeTab || !lorisInMonth.includes(activeTab)) setActiveTab(lorisInMonth[0]);
     } else {
@@ -541,6 +542,7 @@ function App() {
                   });
                   if (error) { console.error('Insert site error', error); return; }
                   setShowNewSiteForm(false);
+                  setNewSite({ name: '', rate: 80, rainMin: 4.0, lStart: '13:00', lEnd: '14:00', lTh: '14:30', fStart: '12:00', fEnd: '13:30', fTh: '15:30' });
                   await loadData();
                 }}
                 className="space-y-10"
@@ -673,7 +675,14 @@ function App() {
               {workplaces.map((s) => (
                 <div
                   key={s.id}
-                  onClick={() => { setActiveSiteId(s.id); setView('workplace'); }}
+                  onClick={() => {
+                    setActiveSiteId(s.id);
+                    setView('workplace');
+                    setPreviewBatch([]);
+                    setLoriInput('');
+                    setIsManualMode(false);
+                    setEditingEntryId(null);
+                  }}
                   className="bg-white p-10 border-2 hover:border-blue-600 cursor-pointer shadow-sm relative group transition-all"
                 >
                   <button
@@ -698,7 +707,13 @@ function App() {
           /* VIEW: Workplace Ledger */
           <div className="space-y-6">
             <div className="flex justify-between items-center border-b pb-4">
-              <button onClick={() => setView('home')} className="text-blue-600 font-bold uppercase tracking-widest text-xs">← Dashboard</button>
+              <button onClick={() => {
+                setView('home');
+                setPreviewBatch([]);
+                setLoriInput('');
+                setIsManualMode(false);
+                setEditingEntryId(null);
+              }} className="text-blue-600 font-bold uppercase tracking-widest text-xs">← Dashboard</button>
               <div className="flex gap-4">
                 <input type="month" value={selMonth} onChange={(e) => setSelMonth(e.target.value)} className="bg-white border px-4 py-2 font-bold outline-none text-xs uppercase cursor-pointer" />
                 <button onClick={exportExcel} className="bg-green-700 text-white px-8 py-2 font-black text-xs uppercase shadow-sm">Excel Export</button>
@@ -907,7 +922,10 @@ function App() {
                                 </>
                               ) : (
                                 <>
-                                  <td className="p-6 font-bold text-base text-slate-700">{e.date}</td>
+                                  <td className="p-6 font-bold text-base text-slate-700">
+                                    {e.date}
+                                    {e.isRain && <span className="ml-2 text-[9px] bg-blue-100 text-blue-600 font-black uppercase px-1.5 py-0.5 rounded tracking-wide">Rain</span>}
+                                  </td>
                                   <td className="p-6 text-slate-500 font-mono text-sm">{e.timeRange}</td>
                                   <td className="p-6 font-bold text-red-400 text-base">{e.rest.toFixed(1)}h</td>
                                   <td className="p-6 font-black text-slate-800 text-base">{e.hours.toFixed(1)}h</td>
