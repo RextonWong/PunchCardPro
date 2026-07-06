@@ -198,16 +198,53 @@ function App() {
     const lines = text.toLowerCase().split('\n');
     const newBatch = [];
 
-    const convertTo24H = (hour, modifier) => {
-      let h = parseInt(hour, 10);
-      if (modifier === 'pm' && h < 12) h += 12;
-      if (modifier === 'am' && h === 12) h = 0;
-      return `${h.toString().padStart(2, '0')}00`;
+    // Fix common OCR confusions, but only when adjacent to a real digit so
+    // normal words ("lori", "hujan", "in/out") stay untouched: o→0, l/i→1
+    const fixDigitConfusions = (s) => {
+      // Repeat until stable so runs like "o8oo" fully resolve to "0800"
+      let prev;
+      do {
+        prev = s;
+        s = s
+          .replace(/(?<=\d)o|o(?=\d)/g, '0')
+          .replace(/(?<=\d)[li]|[li](?=\d)/g, '1');
+      } while (s !== prev);
+      return s;
     };
 
-    lines.forEach((line) => {
-      const dayMatch   = line.match(/^([1-3][0-9]|[1-9])\b/);
-      const timeMatches = [...line.matchAll(/(\d{1,2})\s*(am|pm)/g)];
+    // Pull every clock time out of a line. Handwritten cards use many
+    // formats: "7am", "7.30am", "7:30 pm", "0800", "19:00", "8.00"
+    const extractTimes = (line) => {
+      const found = [];
+      const taken = [];
+      const overlaps = (start, end) => taken.some(([s, e]) => start < e && end > s);
+
+      // 12-hour with am/pm, optional minutes
+      for (const m of line.matchAll(/(\d{1,2})(?:[:.]\s?([0-5]\d))?\s*(am|pm)/g)) {
+        let h = parseInt(m[1], 10);
+        if (h > 12) continue;
+        if (m[3] === 'pm' && h < 12) h += 12;
+        if (m[3] === 'am' && h === 12) h = 0;
+        found.push({ i: m.index, t: `${String(h).padStart(2, '0')}${m[2] || '00'}` });
+        taken.push([m.index, m.index + m[0].length]);
+      }
+
+      // 24-hour with separator ("19:00", "8.30") or compact 4-digit ("0800")
+      for (const m of line.matchAll(/\b(\d{1,2})[:.]([0-5]\d)\b|\b([01]\d|2[0-3])([0-5]\d)\b/g)) {
+        const end = m.index + m[0].length;
+        if (overlaps(m.index, end)) continue;
+        const h = parseInt(m[1] ?? m[3], 10);
+        if (h > 23) continue;
+        found.push({ i: m.index, t: `${String(h).padStart(2, '0')}${m[2] ?? m[4]}` });
+        taken.push([m.index, end]);
+      }
+
+      return found.sort((a, b) => a.i - b.i).map((x) => x.t);
+    };
+
+    lines.forEach((rawLine) => {
+      const line = fixDigitConfusions(rawLine);
+      const dayMatch = line.match(/^\s*([1-3][0-9]|[1-9])\b/);
       // Detect "rain" or "hujan" (Malay) anywhere on the line, case-insensitive
       const isRainLine = /\b(rain|hujan)\b/i.test(line);
 
@@ -216,15 +253,17 @@ function App() {
       const dayNumber = dayMatch[1].padStart(2, '0');
       const fullDate  = `${selMonth}-${dayNumber}`;
 
-      if (timeMatches.length >= 2) {
+      // Search for times only after the day number so "1" in "13" etc.
+      // can never be mistaken for a clock time
+      const times = extractTimes(line.slice(dayMatch[0].length));
+
+      if (times.length >= 2) {
         // Normal day with clock times — mark rain if keyword present on the line
-        const firstTime = timeMatches[0];
-        const lastTime  = timeMatches[timeMatches.length - 1];
         newBatch.push({
           id: Date.now() + Math.random(),
           date: fullDate,
-          in:   convertTo24H(firstTime[1], firstTime[2]),
-          out:  convertTo24H(lastTime[1],  lastTime[2]),
+          in:   times[0],
+          out:  times[times.length - 1],
           isRain: isRainLine,
         });
       } else if (isRainLine) {
@@ -242,34 +281,77 @@ function App() {
     if (newBatch.length > 0) setPreviewBatch(newBatch);
   };
 
+  // Upscale + grayscale + contrast-stretch the image before OCR.
+  // Google Vision reads handwriting far better on large, high-contrast
+  // input than on small dim phone photos.
+  const preprocessImage = (file) =>
+    new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        // Upscale so the longest side is ~2000px (never downscale, cap at 3x)
+        const scale = Math.min(3, Math.max(1, 2000 / Math.max(img.width, img.height)));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        // Grayscale, building a histogram for the contrast stretch
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const px = imgData.data;
+        const hist = new Array(256).fill(0);
+        for (let i = 0; i < px.length; i += 4) {
+          const g = Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]);
+          px[i] = px[i + 1] = px[i + 2] = g;
+          hist[g]++;
+        }
+        // Stretch between the 1st and 99th percentile so faded pencil
+        // becomes dark and paper becomes white, ignoring outlier pixels
+        const totalPx = px.length / 4;
+        let lo = 0, hi = 255, acc = 0;
+        for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= totalPx * 0.01) { lo = v; break; } }
+        acc = 0;
+        for (let v = 255; v >= 0; v--) { acc += hist[v]; if (acc >= totalPx * 0.01) { hi = v; break; } }
+        const range = Math.max(1, hi - lo);
+        for (let i = 0; i < px.length; i += 4) {
+          const v = Math.max(0, Math.min(255, ((px[i] - lo) / range) * 255));
+          px[i] = px[i + 1] = px[i + 2] = v;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL('image/jpeg', 0.92).split(',')[1]);
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+
   const processImage = async (file) => {
     if (!file || !file.type || !file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        setIsScanning(true);
-        const base64Image = reader.result.split(',')[1];
-        const response = await fetch(
-          'https://lpfxlrqrllpvlkmarham.supabase.co/functions/v1/ocr-scanner',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization':
-                'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwZnhscnFybGxwdmxrbWFyaGFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjgwNjcsImV4cCI6MjA5MjI0NDA2N30.0s2c8_4TdjY6Lw7vhdA36coDUNkyUbOGlDAZ8sha2bo',
-            },
-            body: JSON.stringify({ image: base64Image }),
-          }
-        );
-        const result = await response.json();
-        if (result.text) parseOCRText(result.text);
-      } catch (err) {
-        console.error('Cloud Error', err);
-      } finally {
-        setIsScanning(false);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      setIsScanning(true);
+      const base64Image = await preprocessImage(file);
+      const response = await fetch(
+        'https://lpfxlrqrllpvlkmarham.supabase.co/functions/v1/ocr-scanner',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization':
+              'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwZnhscnFybGxwdmxrbWFyaGFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjgwNjcsImV4cCI6MjA5MjI0NDA2N30.0s2c8_4TdjY6Lw7vhdA36coDUNkyUbOGlDAZ8sha2bo',
+          },
+          body: JSON.stringify({ image: base64Image }),
+        }
+      );
+      const result = await response.json();
+      if (result.text) parseOCRText(result.text);
+    } catch (err) {
+      console.error('Cloud Error', err);
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   const handleFileChange = (e) => {

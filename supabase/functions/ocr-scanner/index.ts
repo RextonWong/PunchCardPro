@@ -26,7 +26,10 @@ serve(async (req) => {
         body: JSON.stringify({
           requests: [{
             image: { content: image },
-            features: [{ type: 'DOCUMENT_TEXT_DETECTION' }]
+            features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+            // Punch cards mix English and Malay ("hujan") — hinting the
+            // languages improves Vision's handwriting recognition accuracy
+            imageContext: { languageHints: ['en', 'ms'] }
           }]
         })
       }
