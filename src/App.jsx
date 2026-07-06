@@ -281,6 +281,24 @@ function App() {
     if (newBatch.length > 0) setPreviewBatch(newBatch);
   };
 
+  // Convert structured rows from the Gemini-powered scanner into the
+  // preview batch. Illegible fields arrive as null and stay blank for
+  // the admin to fill in — the model is told never to guess.
+  const applyScannedEntries = ({ entries, lori_id }) => {
+    if (lori_id) setLoriInput(String(lori_id).toUpperCase());
+    const batch = entries
+      .map((r) => ({ ...r, day: parseInt(r.day, 10) }))
+      .filter((r) => r.day >= 1 && r.day <= 31 && (r.time_in || r.time_out || r.rain))
+      .map((r) => ({
+        id: Date.now() + Math.random(),
+        date: `${selMonth}-${String(r.day).padStart(2, '0')}`,
+        in: r.time_in || '',
+        out: r.time_out || '',
+        isRain: !!r.rain,
+      }));
+    if (batch.length > 0) setPreviewBatch(batch);
+  };
+
   // Upscale + grayscale + contrast-stretch the image before OCR.
   // Google Vision reads handwriting far better on large, high-contrast
   // input than on small dim phone photos.
@@ -346,7 +364,13 @@ function App() {
         }
       );
       const result = await response.json();
-      if (result.text) parseOCRText(result.text);
+      if (Array.isArray(result.entries)) {
+        // Gemini engine: structured rows, no regex parsing needed
+        applyScannedEntries(result);
+      } else if (result.text) {
+        // Vision fallback: raw text through the regex parser
+        parseOCRText(result.text);
+      }
     } catch (err) {
       console.error('Cloud Error', err);
     } finally {
