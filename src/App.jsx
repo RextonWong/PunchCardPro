@@ -627,7 +627,7 @@ function App() {
         {/* MODAL: New Site */}
         {showNewSiteForm && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-4xl p-10 shadow-2xl rounded-sm border">
+            <div className="bg-white w-full max-w-4xl p-6 sm:p-10 shadow-2xl rounded-sm border max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-8 border-b pb-4">
                 <h3 className="font-bold text-xs uppercase text-blue-600">Site Configuration</h3>
                 <button onClick={() => setShowNewSiteForm(false)} className="text-2xl">&times;</button>
@@ -667,12 +667,12 @@ function App() {
                     <input type="number" step="0.5" value={newSite.rainMin} onChange={(e) => setNewSite({ ...newSite, rainMin: parseFloat(e.target.value) })} className="w-full border p-3 mt-1 outline-none" />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-12">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-12">
                   <div className="space-y-4 bg-slate-50 p-6 border">
                     <p className="text-[10px] font-black uppercase text-slate-500 border-b pb-2">Mon-Thu Lunch Logic</p>
                     <div className="grid grid-cols-2 gap-4">
-                      <input type="time" value={newSite.lStart} onChange={(e) => setNewSite({ ...newSite, lStart: e.target.value })} className="border p-2" />
-                      <input type="time" value={newSite.lEnd} onChange={(e) => setNewSite({ ...newSite, lEnd: e.target.value })} className="border p-2" />
+                      <input type="time" value={newSite.lStart} onChange={(e) => setNewSite({ ...newSite, lStart: e.target.value })} className="border p-2 w-full" />
+                      <input type="time" value={newSite.lEnd} onChange={(e) => setNewSite({ ...newSite, lEnd: e.target.value })} className="border p-2 w-full" />
                     </div>
                     <label className="text-[10px] font-bold uppercase text-blue-600">Deduct rest if Clock-Out after:</label>
                     <input type="time" value={newSite.lTh} onChange={(e) => setNewSite({ ...newSite, lTh: e.target.value })} className="w-full border p-2" />
@@ -680,8 +680,8 @@ function App() {
                   <div className="bg-yellow-50/20 p-6 border border-yellow-100 space-y-4">
                     <p className="text-[10px] font-black uppercase text-yellow-600 border-b pb-2">Friday Prayer Protocol</p>
                     <div className="grid grid-cols-2 gap-4">
-                      <input type="time" value={newSite.fStart} onChange={(e) => setNewSite({ ...newSite, fStart: e.target.value })} className="border p-2" />
-                      <input type="time" value={newSite.fEnd} onChange={(e) => setNewSite({ ...newSite, fEnd: e.target.value })} className="border p-2" />
+                      <input type="time" value={newSite.fStart} onChange={(e) => setNewSite({ ...newSite, fStart: e.target.value })} className="border p-2 w-full" />
+                      <input type="time" value={newSite.fEnd} onChange={(e) => setNewSite({ ...newSite, fEnd: e.target.value })} className="border p-2 w-full" />
                     </div>
                     <label className="text-[10px] font-bold uppercase text-yellow-700">Deduct rest if Clock-Out after:</label>
                     <input type="time" value={newSite.fTh} onChange={(e) => setNewSite({ ...newSite, fTh: e.target.value })} className="w-full border p-2" />
@@ -696,7 +696,7 @@ function App() {
         {/* MODAL: Edit Site Settings */}
         {showEditSiteForm && editSiteValues && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-4xl p-10 shadow-2xl rounded-sm border">
+            <div className="bg-white w-full max-w-4xl p-6 sm:p-10 shadow-2xl rounded-sm border max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-8 border-b pb-4">
                 <h3 className="font-bold text-xs uppercase text-blue-600">Edit Site Configuration</h3>
                 <button onClick={() => setShowEditSiteForm(false)} className="text-2xl">&times;</button>
@@ -716,12 +716,12 @@ function App() {
                     <input type="number" step="0.5" value={editSiteValues.rainMin} onChange={(e) => setEditSiteValues({ ...editSiteValues, rainMin: parseFloat(e.target.value) })} className="w-full border p-3 mt-1 outline-none" />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-12">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-12">
                   <div className="space-y-4 bg-slate-50 p-6 border">
                     <p className="text-[10px] font-black uppercase text-slate-500 border-b pb-2">Mon-Thu Lunch Logic</p>
                     <div className="grid grid-cols-2 gap-4">
-                      <input type="time" value={editSiteValues.lStart} onChange={(e) => setEditSiteValues({ ...editSiteValues, lStart: e.target.value })} className="border p-2" />
-                      <input type="time" value={editSiteValues.lEnd} onChange={(e) => setEditSiteValues({ ...editSiteValues, lEnd: e.target.value })} className="border p-2" />
+                      <input type="time" value={editSiteValues.lStart} onChange={(e) => setEditSiteValues({ ...editSiteValues, lStart: e.target.value })} className="border p-2 w-full" />
+                      <input type="time" value={editSiteValues.lEnd} onChange={(e) => setEditSiteValues({ ...editSiteValues, lEnd: e.target.value })} className="border p-2 w-full" />
                     </div>
                     <label className="text-[10px] font-bold uppercase text-blue-600">Deduct rest if Clock-Out after:</label>
                     <input type="time" value={editSiteValues.lTh} onChange={(e) => setEditSiteValues({ ...editSiteValues, lTh: e.target.value })} className="w-full border p-2" />
@@ -729,8 +729,8 @@ function App() {
                   <div className="bg-yellow-50/20 p-6 border border-yellow-100 space-y-4">
                     <p className="text-[10px] font-black uppercase text-yellow-600 border-b pb-2">Friday Prayer Protocol</p>
                     <div className="grid grid-cols-2 gap-4">
-                      <input type="time" value={editSiteValues.fStart} onChange={(e) => setEditSiteValues({ ...editSiteValues, fStart: e.target.value })} className="border p-2" />
-                      <input type="time" value={editSiteValues.fEnd} onChange={(e) => setEditSiteValues({ ...editSiteValues, fEnd: e.target.value })} className="border p-2" />
+                      <input type="time" value={editSiteValues.fStart} onChange={(e) => setEditSiteValues({ ...editSiteValues, fStart: e.target.value })} className="border p-2 w-full" />
+                      <input type="time" value={editSiteValues.fEnd} onChange={(e) => setEditSiteValues({ ...editSiteValues, fEnd: e.target.value })} className="border p-2 w-full" />
                     </div>
                     <label className="text-[10px] font-bold uppercase text-yellow-700">Deduct rest if Clock-Out after:</label>
                     <input type="time" value={editSiteValues.fTh} onChange={(e) => setEditSiteValues({ ...editSiteValues, fTh: e.target.value })} className="w-full border p-2" />
@@ -745,7 +745,7 @@ function App() {
         {/* MODAL: Apply changes to previous entries? */}
         {showApplyChoiceModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-md p-10 shadow-2xl rounded-sm border">
+            <div className="bg-white w-full max-w-md p-6 sm:p-10 shadow-2xl rounded-sm border max-h-[90vh] overflow-y-auto">
               <h3 className="font-bold text-sm uppercase text-slate-800 mb-3">Apply Changes to Previous Entries?</h3>
               <p className="text-xs text-slate-500 mb-8 leading-relaxed">
                 You changed the rate or rest rules. Do you want to recalculate all existing entries for this site using the new settings?
@@ -768,9 +768,9 @@ function App() {
         {/* VIEW: Home Dashboard */}
         {view === 'home' ? (
           <div>
-            <div className="flex justify-between items-center mb-10 border-b pb-6">
-              <h2 className="text-3xl font-bold tracking-tighter uppercase">Project Portfolio</h2>
-              <div className="flex gap-3 items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-10 border-b pb-6">
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tighter uppercase">Project Portfolio</h2>
+              <div className="flex flex-wrap gap-3 items-center">
                 <button onClick={() => setView('analytics')} className="border-2 border-slate-300 text-slate-600 px-8 py-2 font-bold uppercase text-xs hover:border-blue-600 hover:text-blue-600 transition-colors">Analytics</button>
                 <button onClick={() => setShowNewSiteForm(true)} className="bg-blue-600 text-white px-8 py-2 font-bold uppercase text-xs shadow-md">+ New Site</button>
                 <button onClick={() => supabase.auth.signOut()} className="text-slate-400 hover:text-red-500 font-bold uppercase text-xs tracking-widest transition-colors">Sign Out</button>
@@ -812,7 +812,7 @@ function App() {
 
           /* VIEW: Workplace Ledger */
           <div className="space-y-6">
-            <div className="flex justify-between items-center border-b pb-4">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b pb-4">
               <button onClick={() => {
                 setView('home');
                 setPreviewBatch([]);
@@ -820,21 +820,21 @@ function App() {
                 setIsManualMode(false);
                 setEditingEntryId(null);
               }} className="text-blue-600 font-bold uppercase tracking-widest text-xs">← Dashboard</button>
-              <div className="flex gap-4">
+              <div className="flex flex-wrap gap-3 sm:gap-4">
                 <input type="month" value={selMonth} onChange={(e) => setSelMonth(e.target.value)} className="bg-white border px-4 py-2 font-bold outline-none text-xs uppercase cursor-pointer" />
                 <button onClick={exportExcel} className="bg-green-700 text-white px-8 py-2 font-black text-xs uppercase shadow-sm">Excel Export</button>
               </div>
             </div>
 
-            <header className="bg-blue-600 p-12 text-white shadow-xl border-b-8 border-blue-800 relative">
-              <h1 className="text-7xl font-light uppercase tracking-tighter mb-4">{activeSite?.name}</h1>
+            <header className="bg-blue-600 p-6 sm:p-12 text-white shadow-xl border-b-8 border-blue-800 relative">
+              <h1 className="text-3xl sm:text-5xl md:text-7xl font-light uppercase tracking-tighter mb-4 pr-28 sm:pr-32 break-words">{activeSite?.name}</h1>
               <p className="font-bold text-xs opacity-60">RM {activeSite?.rate}/H | {activeSite?.rainMin}H MIN</p>
-              <button onClick={openEditSite} className="absolute top-6 right-6 border border-white/40 text-white/70 hover:text-white hover:border-white px-4 py-2 font-bold text-xs uppercase tracking-widest transition-colors">
+              <button onClick={openEditSite} className="absolute top-4 right-4 sm:top-6 sm:right-6 border border-white/40 text-white/70 hover:text-white hover:border-white px-3 sm:px-4 py-2 font-bold text-[10px] sm:text-xs uppercase tracking-widest transition-colors">
                 Edit Site
               </button>
             </header>
 
-            <div className="grid grid-cols-12 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
 
               {/* LEFT COLUMN: Scanner & Preview */}
               <div className="lg:col-span-4 space-y-4">
@@ -882,8 +882,8 @@ function App() {
                       />
                     </div>
 
-                    <div className="overflow-y-auto flex-grow p-4">
-                      <table className="w-full text-left text-xs">
+                    <div className="overflow-y-auto overflow-x-auto flex-grow p-4">
+                      <table className="w-full text-left text-xs min-w-[380px]">
                         <thead className="sticky top-0 bg-white shadow-sm text-[10px] text-slate-400 uppercase tracking-widest">
                           <tr>
                             <th className="py-3 px-2">Date</th>
@@ -951,21 +951,22 @@ function App() {
               {/* RIGHT COLUMN: Ledger Table */}
               <div className="lg:col-span-8 bg-white border shadow-sm min-h-[500px]">
                 {lorisInMonth.length === 0 ? (
-                  <div className="p-40 text-center text-slate-300 italic uppercase font-light">Empty Ledger</div>
+                  <div className="p-16 sm:p-40 text-center text-slate-300 italic uppercase font-light">Empty Ledger</div>
                 ) : (
                   <>
-                    <div className="flex bg-slate-100 p-1 gap-1">
+                    <div className="flex overflow-x-auto bg-slate-100 p-1 gap-1">
                       {lorisInMonth.map((id) => (
                         <button
                           key={id}
                           onClick={() => setActiveTab(id)}
-                          className={`px-10 py-3 text-xs font-bold uppercase ${activeTab === id ? 'bg-white text-blue-600 shadow-sm border-t-4 border-blue-600' : 'text-slate-400'}`}
+                          className={`px-4 sm:px-10 py-3 text-xs font-bold uppercase whitespace-nowrap flex-shrink-0 ${activeTab === id ? 'bg-white text-blue-600 shadow-sm border-t-4 border-blue-600' : 'text-slate-400'}`}
                         >
                           Lorry {id}
                         </button>
                       ))}
                     </div>
-                    <table className="w-full text-left">
+                    <div className="overflow-x-auto">
+                    <table className="w-full text-left min-w-[640px]">
                       <thead className="bg-slate-50 border-b text-xs font-bold text-slate-500 uppercase tracking-widest">
                         <tr>
                           <th className="p-6">Date</th>
@@ -1071,6 +1072,7 @@ function App() {
                         </tr>
                       </tfoot>
                     </table>
+                    </div>
                   </>
                 )}
               </div>

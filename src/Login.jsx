@@ -91,7 +91,7 @@ function Login() {
 
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
-      <div className="bg-white border w-full max-w-md p-12 shadow-sm">
+      <div className="bg-white border w-full max-w-md p-6 sm:p-12 shadow-sm">
 
         <div className="mb-10">
           <h1 className="text-4xl font-black uppercase tracking-tighter text-slate-800">

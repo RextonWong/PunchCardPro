@@ -405,7 +405,8 @@ function Analytics({ workplaces, onBack }) {
                   </button>
                 </div>
               </div>
-              <table className="w-full text-left">
+              <div className="overflow-x-auto">
+              <table className="w-full text-left min-w-[560px]">
                 <thead className="bg-slate-50 border-b text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                   <tr>
                     <th className="p-4 w-8">#</th>
@@ -455,6 +456,7 @@ function Analytics({ workplaces, onBack }) {
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </div>
 
           </>
