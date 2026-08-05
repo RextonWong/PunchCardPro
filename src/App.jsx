@@ -630,6 +630,28 @@ function App() {
     }
   };
 
+  const deleteLorryEntries = async (e, loriId) => {
+    e.stopPropagation();
+    const entryIds = siteEntries
+      .filter((entry) => entry.loriId === loriId && String(entry.date).startsWith(selMonth))
+      .map((entry) => entry.id);
+    if (entryIds.length === 0) return;
+
+    const confirmed = window.confirm(
+      `Delete Lorry ${loriId} from ${selMonth}?\n\nThis will permanently remove all ${entryIds.length} ledger ${entryIds.length === 1 ? 'entry' : 'entries'} for this lorry in the selected month.`
+    );
+    if (!confirmed) return;
+
+    const { error } = await supabase.from('entries').delete().in('id', entryIds);
+    if (error) {
+      console.error('Delete lorry entries error', error);
+      alert('Could not delete this lorry: ' + error.message);
+      return;
+    }
+    if (activeTab === loriId) setActiveTab(null);
+    await loadData();
+  };
+
   // Save an edited ledger row: recalculate hours/rest/total, then update Supabase
   const saveEntryEdit = async (entryId) => {
     const math = calculateDailyHours(
@@ -769,9 +791,9 @@ function App() {
   };
 
   // --- PREPARE LEDGER TOTALS ---
-  const displayedEntries = siteEntries.filter(
-    (e) => e.loriId === activeTab && String(e.date).startsWith(selMonth)
-  );
+  const displayedEntries = siteEntries
+    .filter((e) => e.loriId === activeTab && String(e.date).startsWith(selMonth))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const totalMonthlyHours = displayedEntries.reduce((sum, e) => sum + e.hours, 0);
   const totalMonthlyFees = displayedEntries.reduce((sum, e) => sum + e.total, 0);
 
@@ -1188,13 +1210,23 @@ function App() {
                   <>
                     <div className="flex overflow-x-auto bg-slate-100 p-1 gap-1">
                       {lorisInMonth.map((id) => (
-                        <button
-                          key={id}
-                          onClick={() => setActiveTab(id)}
-                          className={`px-4 sm:px-10 py-3 text-xs font-bold uppercase whitespace-nowrap flex-shrink-0 ${activeTab === id ? 'bg-white text-blue-600 shadow-sm border-t-4 border-blue-600' : 'text-slate-400'}`}
-                        >
-                          Lorry {id}
-                        </button>
+                        <div key={id} className="group relative flex-shrink-0">
+                          <button
+                            onClick={() => setActiveTab(id)}
+                            className={`pl-4 pr-10 sm:pl-10 sm:pr-12 py-3 text-xs font-bold uppercase whitespace-nowrap ${activeTab === id ? 'bg-white text-blue-600 shadow-sm border-t-4 border-blue-600' : 'text-slate-400'}`}
+                          >
+                            Lorry {id}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Delete Lorry ${id} entries for ${selMonth}`}
+                            title={`Delete Lorry ${id} from this month`}
+                            onClick={(e) => deleteLorryEntries(e, id)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center text-lg font-bold leading-none text-red-400 opacity-0 pointer-events-none transition-opacity hover:text-red-600 focus:opacity-100 focus:pointer-events-auto group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+                          >
+                            ×
+                          </button>
+                        </div>
                       ))}
                     </div>
                     <div className="overflow-x-auto">
