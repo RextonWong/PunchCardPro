@@ -31,6 +31,11 @@ const normalizeScannedTime = (value) => {
   return hours <= 23 && minutes <= 59 ? digits : '';
 };
 
+const toTimeInputValue = (value) => {
+  const normalized = normalizeScannedTime(value);
+  return normalized ? `${normalized.slice(0, 2)}:${normalized.slice(2)}` : '';
+};
+
 const withFridayFallback = (site) => ({
   ...site,
   fStart: site.fStart || site.lStart,
@@ -654,19 +659,25 @@ function App() {
 
   // Save an edited ledger row: recalculate hours/rest/total, then update Supabase
   const saveEntryEdit = async (entryId) => {
+    const normalizedTimes = {
+      in: normalizeScannedTime(editingValues.in),
+      out: normalizeScannedTime(editingValues.out),
+      restOut: normalizeScannedTime(editingValues.restOut),
+      restIn: normalizeScannedTime(editingValues.restIn),
+    };
     const math = calculateDailyHours(
       editingValues.date,
-      editingValues.in,
-      editingValues.out,
+      normalizedTimes.in,
+      normalizedTimes.out,
       editingValues.isRain,
       activeSite,
-      editingValues.restOut,
-      editingValues.restIn
+      normalizedTimes.restOut,
+      normalizedTimes.restIn
     );
     const { error } = await supabase.from('entries').update({
       date: editingValues.date,
       time_range: formatStoredTimeRange(
-        editingValues.in, editingValues.out, editingValues.restOut, editingValues.restIn
+        normalizedTimes.in, normalizedTimes.out, normalizedTimes.restOut, normalizedTimes.restIn
       ),
       hours: math.hours,
       rest: math.rest,
@@ -1256,36 +1267,48 @@ function App() {
                                       className="border p-2 text-xs font-mono outline-none focus:border-blue-500 w-full"
                                     />
                                   </td>
-                                  <td className="p-3" colSpan="2">
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <input
-                                        value={editingValues.in}
-                                        onChange={(ev) => setEditingValues({ ...editingValues, in: ev.target.value })}
-                                        placeholder="Work in 0800"
-                                        maxLength="4"
-                                        className="border text-center font-mono p-2 text-xs outline-none focus:border-blue-500 w-full"
-                                      />
-                                      <input
-                                        value={editingValues.out}
-                                        onChange={(ev) => setEditingValues({ ...editingValues, out: ev.target.value })}
-                                        placeholder="Work out 1900"
-                                        maxLength="4"
-                                        className="border text-center font-mono p-2 text-xs outline-none focus:border-blue-500 w-full"
-                                      />
-                                      <input
-                                        value={editingValues.restOut}
-                                        onChange={(ev) => setEditingValues({ ...editingValues, restOut: ev.target.value })}
-                                        placeholder="Rest out 1300"
-                                        maxLength="4"
-                                        className="border text-center font-mono p-2 text-xs outline-none focus:border-amber-500 w-full bg-amber-50/30"
-                                      />
-                                      <input
-                                        value={editingValues.restIn}
-                                        onChange={(ev) => setEditingValues({ ...editingValues, restIn: ev.target.value })}
-                                        placeholder="Rest in 1400"
-                                        maxLength="4"
-                                        className="border text-center font-mono p-2 text-xs outline-none focus:border-amber-500 w-full bg-amber-50/30"
-                                      />
+                                  <td className="p-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      <label className="text-[9px] font-bold uppercase text-slate-400">
+                                        Work In
+                                        <input
+                                          type="time"
+                                          value={editingValues.in}
+                                          onChange={(ev) => setEditingValues({ ...editingValues, in: ev.target.value })}
+                                          className="mt-1 border text-center font-mono p-2 text-xs outline-none focus:border-blue-500 w-full"
+                                        />
+                                      </label>
+                                      <label className="text-[9px] font-bold uppercase text-slate-400">
+                                        Work Out
+                                        <input
+                                          type="time"
+                                          value={editingValues.out}
+                                          onChange={(ev) => setEditingValues({ ...editingValues, out: ev.target.value })}
+                                          className="mt-1 border text-center font-mono p-2 text-xs outline-none focus:border-blue-500 w-full"
+                                        />
+                                      </label>
+                                    </div>
+                                  </td>
+                                  <td className="p-3 bg-amber-50/30">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      <label className="text-[9px] font-bold uppercase text-amber-700">
+                                        Lunch Out
+                                        <input
+                                          type="time"
+                                          value={editingValues.restOut}
+                                          onChange={(ev) => setEditingValues({ ...editingValues, restOut: ev.target.value })}
+                                          className="mt-1 border text-center font-mono p-2 text-xs outline-none focus:border-amber-500 w-full bg-white"
+                                        />
+                                      </label>
+                                      <label className="text-[9px] font-bold uppercase text-amber-700">
+                                        Lunch In
+                                        <input
+                                          type="time"
+                                          value={editingValues.restIn}
+                                          onChange={(ev) => setEditingValues({ ...editingValues, restIn: ev.target.value })}
+                                          className="mt-1 border text-center font-mono p-2 text-xs outline-none focus:border-amber-500 w-full bg-white"
+                                        />
+                                      </label>
                                     </div>
                                   </td>
                                   <td className="p-3 text-center">
@@ -1330,10 +1353,10 @@ function App() {
                                           setEditingEntryId(e.id);
                                           setEditingValues({
                                             date: e.date,
-                                            in: tIn,
-                                            restOut: e.restOut || '',
-                                            restIn: e.restIn || '',
-                                            out: tOut,
+                                            in: toTimeInputValue(tIn),
+                                            restOut: toTimeInputValue(e.restOut),
+                                            restIn: toTimeInputValue(e.restIn),
+                                            out: toTimeInputValue(tOut),
                                             isRain: e.isRain,
                                           });
                                         }}
