@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
 import Analytics from './Analytics';
 import Login from './Login';
+import { LegalLinks } from './LegalNotices';
 
 // PostgreSQL TIME columns return "HH:MM:SS" — trim to "HH:MM" for <input type="time">
 const pgTime = (t) => (t ? t.slice(0, 5) : '');
@@ -35,6 +36,47 @@ const toTimeInputValue = (value) => {
   const normalized = normalizeScannedTime(value);
   return normalized ? `${normalized.slice(0, 2)}:${normalized.slice(2)}` : '';
 };
+
+const createMonthBatch = (month) => {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const daysInMonth = new Date(year, monthNumber, 0).getDate();
+  return Array.from({ length: daysInMonth }, (_, index) => {
+    const date = `${month}-${String(index + 1).padStart(2, '0')}`;
+    return { id: date, date, in: '', restOut: '', restIn: '', out: '', isRain: false };
+  });
+};
+
+const hasDayInput = (day) =>
+  Boolean(day.in || day.restOut || day.restIn || day.out || day.isRain);
+
+const mergeScannedDays = (currentRows, scannedRows) => {
+  const scannedByDate = new Map(scannedRows.map((day) => [day.date, day]));
+  return currentRows.map((day) => {
+    const scanned = scannedByDate.get(day.date);
+    if (!scanned) return day;
+    return {
+      ...day,
+      in: day.in || scanned.in,
+      restOut: day.restOut || scanned.restOut,
+      restIn: day.restIn || scanned.restIn,
+      out: day.out || scanned.out,
+      isRain: scanned.isRain || day.isRain,
+    };
+  });
+};
+
+const EditIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 20h4l11-11a2 2 0 0 0-4-4L4 16v4Z" />
+    <path strokeLinecap="round" d="m13.5 6.5 4 4" />
+  </svg>
+);
+
+const TrashIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6" />
+  </svg>
+);
 
 const withFridayFallback = (site) => ({
   ...site,
@@ -141,11 +183,15 @@ function App() {
 
   // --- 2. INPUT & UI STATE ---
   const [loriInput, setLoriInput] = useState('');
-  const [previewBatch, setPreviewBatch] = useState([]);
-  const [isManualMode, setIsManualMode] = useState(false);
-
   const [selMonth, setSelMonth] = useState(() => new Date().toISOString().substring(0, 7));
+  const [previewBatch, setPreviewBatch] = useState(() => createMonthBatch(new Date().toISOString().substring(0, 7)));
   const [activeTab, setActiveTab] = useState(null);
+  const filledDays = previewBatch.filter(hasDayInput).length;
+  const invalidDraftDays = previewBatch.filter((day) => hasDayInput(day) && (
+    (!day.isRain && (!day.in || !day.out)) ||
+    Boolean(day.restOut) !== Boolean(day.restIn) ||
+    [day.in, day.restOut, day.restIn, day.out].some((time) => time && !normalizeScannedTime(time))
+  ));
 
   const [newSite, setNewSite] = useState({
     name: '', rate: 80, rainMin: 4.0,
@@ -169,13 +215,6 @@ function App() {
 
   const activeSite = workplaces.find((s) => s.id === activeSiteId) || null;
   const siteEntries = activeSite?.entries || [];
-  const availableMonths = [...new Set(siteEntries.map((e) => String(e.date).substring(0, 7)))].sort().reverse();
-
-  useEffect(() => {
-    if (view === 'workplace' && activeSiteId) {
-      setSelMonth(availableMonths[0] || new Date().toISOString().substring(0, 7));
-    }
-  }, [activeSiteId, view]);
 
   const lorisInMonth = [...new Set(
     siteEntries.filter((e) => String(e.date).startsWith(selMonth)).map((e) => e.loriId)
@@ -254,8 +293,11 @@ function App() {
 
     const lMatch = text.match(/(?:LOR[IY]|LORRY|#)\s*([A-Z0-9]+)/i);
     const bracketMatch = text.match(/\((.*?)\)/);
-    if (lMatch && lMatch[1]) setLoriInput(lMatch[1].toUpperCase());
-    else if (bracketMatch && bracketMatch[1]) setLoriInput(bracketMatch[1].toUpperCase());
+    const scannedLoriId = (lMatch?.[1] || bracketMatch?.[1] || '').trim().toUpperCase();
+    if (scannedLoriId && loriInput.trim() && loriInput.trim().toUpperCase() !== scannedLoriId && filledDays > 0) {
+      setScanError(`This card is marked ${scannedLoriId}, but the current draft is for ${loriInput.trim().toUpperCase()}. Finish or clear that draft before scanning another lorry.`);
+      return null;
+    }
 
     const lines = text.toLowerCase().split('\n');
     const newBatch = [];
@@ -359,8 +401,11 @@ function App() {
       }
     });
 
-    if (newBatch.length > 0) {
-      setPreviewBatch(newBatch);
+    const validDates = new Set(createMonthBatch(selMonth).map((day) => day.date));
+    const validBatch = newBatch.filter((day) => validDates.has(day.date));
+    if (validBatch.length > 0) {
+      if (scannedLoriId) setLoriInput(scannedLoriId);
+      setPreviewBatch((current) => mergeScannedDays(current, validBatch));
       return true;
     }
     return false;
@@ -370,14 +415,13 @@ function App() {
   // preview batch. Illegible fields arrive as null and stay blank for
   // the admin to fill in — the model is told never to guess.
   const applyScannedEntries = ({ entries, lori_id }) => {
-    if (lori_id) setLoriInput(String(lori_id).toUpperCase());
+    const daysInMonth = createMonthBatch(selMonth).length;
     const batch = entries
       .map((r) => ({ ...r, day: parseInt(r.day, 10) }))
-      .filter((r) => r.day >= 1 && r.day <= 31 && (
+      .filter((r) => r.day >= 1 && r.day <= daysInMonth && (
         r.time_in || r.rest_out || r.rest_in || r.time_out || r.rain
       ))
       .map((r) => ({
-        id: Date.now() + Math.random(),
         date: `${selMonth}-${String(r.day).padStart(2, '0')}`,
         in: normalizeScannedTime(r.time_in),
         restOut: normalizeScannedTime(r.rest_out),
@@ -385,7 +429,16 @@ function App() {
         out: normalizeScannedTime(r.time_out),
         isRain: !!r.rain,
       }));
-    if (batch.length > 0) setPreviewBatch(batch);
+    if (batch.length === 0) return 0;
+    if (lori_id) {
+      const scannedLoriId = String(lori_id).trim().toUpperCase();
+      if (loriInput.trim() && loriInput.trim().toUpperCase() !== scannedLoriId && filledDays > 0) {
+        setScanError(`This card is marked ${scannedLoriId}, but the current draft is for ${loriInput.trim().toUpperCase()}. Finish or clear that draft before scanning another lorry.`);
+        return null;
+      }
+      setLoriInput(scannedLoriId);
+    }
+    setPreviewBatch((current) => mergeScannedDays(current, batch));
     return batch.length;
   };
 
@@ -403,7 +456,6 @@ function App() {
         `Gemini found punch cards with different Lorry IDs: ${loriIds.join(', ')}.\n\nAre these cards for the same lorry?\n\nPress OK to combine them, or Cancel to stop and upload them separately.`
       );
       if (!confirmed) {
-        setPreviewBatch([]);
         setScanError('Scan cancelled because the punch cards have different Lorry IDs. Upload each lorry separately.');
         return null;
       }
@@ -429,7 +481,7 @@ function App() {
       entries: [...entriesByDay.values()].sort((a, b) => Number(a.day) - Number(b.day)),
       lori_id: loriIds[0] || null,
     });
-    return count > 0;
+    return count === null ? null : count > 0;
   };
 
   // Upscale + grayscale + contrast-stretch the image before OCR.
@@ -511,7 +563,8 @@ function App() {
         applied = applyScannedCards(result);
       } else if (Array.isArray(result.entries)) {
         // Gemini engine: structured rows, no regex parsing needed
-        applied = applyScannedEntries(result) > 0;
+        const count = applyScannedEntries(result);
+        applied = count === null ? null : count > 0;
       } else if (result.text) {
         // Vision fallback: raw text through the regex parser
         applied = parseOCRText(result.text);
@@ -521,7 +574,6 @@ function App() {
       }
     } catch (err) {
       console.error('Cloud Error', err);
-      setPreviewBatch([]);
       setScanError(err.message || 'The image could not be read. Please try a clearer punch-card photo.');
     } finally {
       setIsScanning(false);
@@ -546,27 +598,30 @@ function App() {
     );
   };
 
-  const initializeManualBatch = () => {
+  const clearDraft = () => {
+    if ((filledDays > 0 || loriInput.trim()) && !window.confirm('Clear all unsaved entries for this month?')) return;
+    setPreviewBatch(createMonthBatch(selMonth));
+    setLoriInput('');
     setScanError('');
     setScanNotice('');
-    setIsManualMode(true);
-    const emptyBatch = [];
-    for (let i = 1; i <= 31; i++) {
-      const dayStr = String(i).padStart(2, '0');
-      emptyBatch.push({
-        id: `manual-${i}`,
-        date: `${selMonth}-${dayStr}`,
-        in: '',
-        restOut: '',
-        restIn: '',
-        out: '',
-        isRain: false,
-      });
-    }
-    setPreviewBatch(emptyBatch);
+  };
+
+  const changeMonth = (month) => {
+    if (!month || month === selMonth) return;
+    if ((filledDays > 0 || loriInput.trim()) && !window.confirm('Switch months and discard unsaved entries?')) return;
+    setSelMonth(month);
+    setPreviewBatch(createMonthBatch(month));
+    setLoriInput('');
+    setScanError('');
+    setScanNotice('');
   };
 
   const approveBatch = async () => {
+    if (filledDays === 0) {
+      setScanError('Enter or scan at least one day before posting to the ledger.');
+      return;
+    }
+    if (invalidDraftDays.length > 0) return;
     if (!activeSite || !loriInput.trim()) {
       alert('Please type a Lorry ID before approving the batch!');
       return;
@@ -611,8 +666,10 @@ function App() {
     }
 
     await loadData();
-    setPreviewBatch([]);
+    setPreviewBatch(createMonthBatch(selMonth));
     setLoriInput('');
+    setScanError('');
+    setScanNotice('');
   };
 
   // --- 6. DELETION LOGIC ---
@@ -770,6 +827,7 @@ function App() {
   const exportExcel = () => {
     if (!activeSite) return;
     const wb = XLSX.utils.book_new();
+    const daysInSelectedMonth = createMonthBatch(selMonth).length;
     lorisInMonth.forEach((id) => {
       const rows = [
         ['LAND VISION TRADING'],
@@ -780,7 +838,7 @@ function App() {
         ['DAY', 'IN', 'OUT', 'REST', 'TOTAL'],
       ];
       let total = 0;
-      for (let d = 1; d <= 31; d++) {
+      for (let d = 1; d <= daysInSelectedMonth; d++) {
         const dStr = `${selMonth}-${String(d).padStart(2, '0')}`;
         const entry = siteEntries.find((i) => String(i.date) === dStr && i.loriId === id);
         if (entry) {
@@ -835,8 +893,8 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 p-3 md:p-6 font-sans text-slate-700">
-      <div className="max-w-[1800px] mx-auto">
+    <div className="min-h-screen flex flex-col bg-slate-100 p-3 pb-28 md:p-6 md:pb-16 font-sans text-slate-700">
+      <div className="w-full max-w-[1800px] flex-1 mx-auto">
 
         {/* MODAL: New Site */}
         {showNewSiteForm && (
@@ -909,7 +967,7 @@ function App() {
                     <input type="time" value={newSite.fTh} onChange={(e) => setNewSite({ ...newSite, fTh: e.target.value })} className="w-full border p-2" />
                   </div>
                 </div>
-                <button type="submit" className="w-full bg-blue-600 text-white py-4 font-bold uppercase text-xs tracking-widest shadow-lg">Save Site Logic</button>
+                <button type="submit" className="w-full border border-blue-700 bg-blue-600 text-white py-4 font-bold uppercase text-xs tracking-widest hover:bg-blue-700">Save Site Logic</button>
               </form>
             </div>
           </div>
@@ -921,7 +979,7 @@ function App() {
             <div className="bg-white w-full max-w-4xl p-6 sm:p-10 shadow-2xl rounded-sm border max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-8 border-b pb-4">
                 <h3 className="font-bold text-xs uppercase text-blue-600">Edit Site Configuration</h3>
-                <button onClick={() => setShowEditSiteForm(false)} className="text-2xl">&times;</button>
+                <button type="button" aria-label="Close site settings" onClick={() => setShowEditSiteForm(false)} className="flex h-9 w-9 items-center justify-center border border-slate-200 bg-white text-2xl text-slate-600 hover:bg-slate-50">&times;</button>
               </div>
               <form onSubmit={handleEditSiteSave} className="space-y-10">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -964,13 +1022,13 @@ function App() {
                       onClick={() => setEditSiteValues({
                         ...editSiteValues, fStart: '', fEnd: '', fTh: '',
                       })}
-                      className="text-[10px] font-bold uppercase text-yellow-700 hover:underline"
+                      className="border border-amber-300 bg-white px-3 py-2 text-[10px] font-bold uppercase text-yellow-700 hover:bg-amber-50"
                     >
                       Use usual rest hours
                     </button>
                   </div>
                 </div>
-                <button type="submit" className="w-full bg-blue-600 text-white py-4 font-bold uppercase text-xs tracking-widest shadow-lg">Save Changes</button>
+                <button type="submit" className="w-full border border-blue-700 bg-blue-600 text-white py-4 font-bold uppercase text-xs tracking-widest hover:bg-blue-700">Save Changes</button>
               </form>
             </div>
           </div>
@@ -985,13 +1043,13 @@ function App() {
                 You changed the rate or rest rules. Do you want to recalculate all existing entries for this site using the new settings?
               </p>
               <div className="space-y-3">
-                <button onClick={() => saveEditSite('all')} className="w-full bg-blue-600 text-white py-4 font-bold text-xs uppercase tracking-widest shadow">
+                <button onClick={() => saveEditSite('all')} className="w-full border border-blue-700 bg-blue-600 text-white py-4 font-bold text-xs uppercase tracking-widest hover:bg-blue-700">
                   Yes — Recalculate All Previous Entries
                 </button>
                 <button onClick={() => saveEditSite('future')} className="w-full border-2 border-slate-300 py-4 font-bold text-xs uppercase tracking-widest text-slate-600 hover:border-slate-500 transition-colors">
                   No — Apply to New Entries Only
                 </button>
-                <button onClick={() => { setShowApplyChoiceModal(false); setPendingEditSiteValues(null); }} className="w-full text-red-400 py-2 font-bold text-xs uppercase hover:underline">
+                <button onClick={() => { setShowApplyChoiceModal(false); setPendingEditSiteValues(null); }} className="w-full border border-red-200 bg-white py-2 font-bold text-xs uppercase text-red-600 hover:bg-red-50">
                   Cancel
                 </button>
               </div>
@@ -1006,8 +1064,8 @@ function App() {
               <h2 className="text-2xl sm:text-3xl font-bold tracking-tighter uppercase">Project Portfolio</h2>
               <div className="flex flex-wrap gap-3 items-center">
                 <button onClick={() => setView('analytics')} className="border-2 border-slate-300 text-slate-600 px-8 py-2 font-bold uppercase text-xs hover:border-blue-600 hover:text-blue-600 transition-colors">Analytics</button>
-                <button onClick={() => setShowNewSiteForm(true)} className="bg-blue-600 text-white px-8 py-2 font-bold uppercase text-xs shadow-md">+ New Site</button>
-                <button onClick={() => supabase.auth.signOut()} className="text-slate-400 hover:text-red-500 font-bold uppercase text-xs tracking-widest transition-colors">Sign Out</button>
+                <button onClick={() => setShowNewSiteForm(true)} className="border border-blue-700 bg-blue-600 text-white px-8 py-2 font-bold uppercase text-xs hover:bg-blue-700">+ New Site</button>
+                <button onClick={() => supabase.auth.signOut()} className="border border-slate-300 bg-white px-4 py-2 text-slate-600 hover:border-red-300 hover:text-red-600 font-bold uppercase text-xs tracking-widest transition-colors">Sign Out</button>
               </div>
             </div>
 
@@ -1016,18 +1074,21 @@ function App() {
                 <div
                   key={s.id}
                   onClick={() => {
+                    const latestMonth = [...new Set((s.entries || []).map((entry) => String(entry.date).substring(0, 7)))].sort().at(-1);
+                    const month = latestMonth || new Date().toISOString().substring(0, 7);
                     setActiveSiteId(s.id);
+                    setSelMonth(month);
+                    setPreviewBatch(createMonthBatch(month));
                     setView('workplace');
-                    setPreviewBatch([]);
                     setLoriInput('');
-                    setIsManualMode(false);
                     setEditingEntryId(null);
                   }}
                   className="bg-white p-10 border-2 hover:border-blue-600 cursor-pointer shadow-sm relative group transition-all"
                 >
                   <button
                     onClick={(e) => deleteSite(e, s.id)}
-                    className="absolute top-4 right-4 text-slate-300 hover:text-red-500 hidden group-hover:block font-black text-lg p-2"
+                    aria-label={`Delete site ${s.name}`}
+                    className="absolute top-4 right-4 flex h-8 w-8 items-center justify-center border border-red-200 bg-white text-red-500 hover:bg-red-50 font-black text-lg"
                     title="Delete Site"
                   >
                     ✕
@@ -1047,23 +1108,23 @@ function App() {
           /* VIEW: Workplace Ledger */
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b pb-4">
-              <button onClick={() => {
+              <button disabled={isScanning} onClick={() => {
+                if ((filledDays > 0 || loriInput.trim()) && !window.confirm('Leave this site and discard unsaved entries?')) return;
                 setView('home');
-                setPreviewBatch([]);
+                setPreviewBatch(createMonthBatch(selMonth));
                 setLoriInput('');
-                setIsManualMode(false);
                 setEditingEntryId(null);
-              }} className="text-blue-600 font-bold uppercase tracking-widest text-xs">← Dashboard</button>
+              }} className="border border-blue-200 bg-white px-3 py-2 text-blue-700 font-bold uppercase tracking-wide text-xs hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50">← Dashboard</button>
               <div className="flex flex-wrap gap-3 sm:gap-4">
-                <input type="month" value={selMonth} onChange={(e) => setSelMonth(e.target.value)} className="bg-white border px-4 py-2 font-bold outline-none text-xs uppercase cursor-pointer" />
-                <button onClick={exportExcel} className="bg-green-700 text-white px-8 py-2 font-black text-xs uppercase shadow-sm">Excel Export</button>
+                <input type="month" value={selMonth} disabled={isScanning} onChange={(e) => changeMonth(e.target.value)} className="bg-white border px-4 py-2 font-bold outline-none text-xs uppercase cursor-pointer disabled:opacity-50" />
+                <button onClick={exportExcel} className="border border-green-800 bg-green-700 text-white px-5 py-2 font-black text-xs uppercase hover:bg-green-800">Excel Export</button>
               </div>
             </div>
 
             <header className="bg-blue-600 p-6 sm:p-12 text-white shadow-xl border-b-8 border-blue-800 relative">
               <h1 className="text-3xl sm:text-5xl md:text-7xl font-light uppercase tracking-tighter mb-4 pr-28 sm:pr-32 break-words">{activeSite?.name}</h1>
               <p className="font-bold text-xs opacity-60">RM {activeSite?.rate}/H | {activeSite?.rainMin}H MIN</p>
-              <button onClick={openEditSite} className="absolute top-4 right-4 sm:top-6 sm:right-6 border border-white/40 text-white/70 hover:text-white hover:border-white px-3 sm:px-4 py-2 font-bold text-[10px] sm:text-xs uppercase tracking-widest transition-colors">
+              <button onClick={openEditSite} className="absolute top-4 right-4 sm:top-6 sm:right-6 border border-white/60 bg-white/10 text-white hover:bg-white/20 px-3 sm:px-4 py-2 font-bold text-[10px] sm:text-xs uppercase tracking-widest transition-colors">
                 Edit Site
               </button>
             </header>
@@ -1084,46 +1145,32 @@ function App() {
                   </div>
                 )}
 
-                {previewBatch.length === 0 && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-900 p-8 text-white relative shadow-xl col-span-2 md:col-span-1 border border-slate-900">
-                      {isScanning && (
-                        <div className="absolute inset-0 bg-blue-600 flex items-center justify-center font-bold text-sm uppercase tracking-widest animate-pulse">
-                          Reading punch card(s)...
-                        </div>
-                      )}
-                      <button
-                        onClick={() => { setIsManualMode(false); setScanError(''); setScanNotice(''); fileInputRef.current.click(); }}
-                        className="w-full bg-transparent text-white font-bold py-6 text-sm uppercase tracking-widest border-2 border-white hover:bg-white hover:text-slate-900 transition-colors"
-                      >
-                        Scan Document
-                      </button>
-                      <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
-                    </div>
-                    <div
-                      className="bg-white border-2 border-slate-200 p-8 shadow-sm col-span-2 md:col-span-1 flex items-center justify-center hover:border-blue-600 cursor-pointer transition-colors"
-                      onClick={initializeManualBatch}
-                    >
-                      <span className="font-bold text-sm uppercase tracking-widest text-slate-600">Manual Entry</span>
-                    </div>
-                  </div>
-                )}
-
-                {previewBatch.length > 0 && (
                   <div className="bg-white border shadow-sm flex flex-col max-h-[800px]">
 
-                    <div className="p-6 border-b space-y-4 bg-slate-50">
-                      <div className="flex justify-between items-center">
-                        <h3 className="font-bold text-sm uppercase text-blue-600">
-                          {isManualMode ? 'Manual Grid' : `AI Scanned (${previewBatch.length} Days)`}
-                        </h3>
-                        <button onClick={() => { setPreviewBatch([]); setIsManualMode(false); setScanError(''); setScanNotice(''); }} className="text-red-500 font-bold text-[10px] hover:underline uppercase">Cancel</button>
+                    <div className="p-4 border-b space-y-3 bg-slate-50">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h3 className="font-bold text-sm uppercase text-blue-600">Monthly Entry</h3>
+                          <p className="text-xs text-slate-500">{filledDays} of {previewBatch.length} days filled</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            disabled={isScanning}
+                            onClick={() => { setScanError(''); setScanNotice(''); fileInputRef.current.click(); }}
+                            className="border border-blue-700 bg-blue-600 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isScanning ? 'Scanning...' : 'Scan Document'}
+                          </button>
+                          <button type="button" disabled={isScanning} onClick={clearDraft} className="border border-red-200 bg-white px-3 py-2 text-xs font-bold uppercase text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">Clear</button>
+                        </div>
                       </div>
+                      <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
                       <input
                         placeholder="LORRY ID (e.g. LD)"
                         value={loriInput}
                         onChange={(e) => setLoriInput(e.target.value)}
-                        className="w-full border p-3 font-bold text-sm shadow-inner"
+                        className="w-full border p-2.5 font-bold text-sm"
                       />
                     </div>
 
@@ -1143,12 +1190,7 @@ function App() {
                           {previewBatch.map((day) => (
                             <tr key={day.id} className="hover:bg-blue-50/50 transition-colors">
                               <td className="py-2 px-2">
-                                <input
-                                  type="date"
-                                  value={day.date}
-                                  onChange={(e) => updateBatchTime(day.id, 'date', e.target.value)}
-                                  className="w-full border p-1.5 text-xs font-mono outline-none focus:border-blue-500 bg-white shadow-inner cursor-pointer"
-                                />
+                                <span className="block whitespace-nowrap font-mono text-slate-600">{day.date.split('-').reverse().join('/')}</span>
                               </td>
                               <td className="py-2 px-2">
                                 <input
@@ -1201,16 +1243,21 @@ function App() {
                     </div>
 
                     <div className="p-4 border-t bg-slate-50">
+                      {invalidDraftDays.length > 0 && (
+                        <p className="mb-3 text-xs font-medium text-red-600" role="alert">
+                          Complete Time In and Time Out, enter rest times as a pair, and use valid times for day {invalidDraftDays.slice(0, 5).map((day) => Number(day.date.slice(-2))).join(', ')}{invalidDraftDays.length > 5 ? ` and ${invalidDraftDays.length - 5} more` : ''}.
+                        </p>
+                      )}
                       <button
                         onClick={approveBatch}
-                        className="w-full bg-green-600 text-white font-bold py-4 text-xs shadow-lg hover:bg-green-700 uppercase tracking-widest"
+                        disabled={filledDays === 0 || invalidDraftDays.length > 0 || isScanning}
+                        className="w-full border border-green-700 bg-green-600 text-white font-bold py-4 text-xs shadow-sm hover:bg-green-700 uppercase tracking-widest disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Approve & Post to Ledger
                       </button>
                     </div>
 
                   </div>
-                )}
               </div>
 
               {/* RIGHT COLUMN: Ledger Table */}
@@ -1219,12 +1266,12 @@ function App() {
                   <div className="p-16 sm:p-40 text-center text-slate-300 italic uppercase font-light">Empty Ledger</div>
                 ) : (
                   <>
-                    <div className="flex overflow-x-auto bg-slate-100 p-1 gap-1">
+                    <div className="flex overflow-x-auto gap-2 border-b bg-slate-50 p-2">
                       {lorisInMonth.map((id) => (
                         <div key={id} className="group relative flex-shrink-0">
                           <button
                             onClick={() => setActiveTab(id)}
-                            className={`pl-4 pr-10 sm:pl-10 sm:pr-12 py-3 text-xs font-bold uppercase whitespace-nowrap ${activeTab === id ? 'bg-white text-blue-600 shadow-sm border-t-4 border-blue-600' : 'text-slate-400'}`}
+                            className={`border px-4 py-2 pr-10 text-xs font-bold uppercase whitespace-nowrap ${activeTab === id ? 'border-blue-300 bg-white text-blue-700' : 'border-slate-200 bg-white text-slate-500 hover:border-blue-300'}`}
                           >
                             Lorry {id}
                           </button>
@@ -1233,7 +1280,7 @@ function App() {
                             aria-label={`Delete Lorry ${id} entries for ${selMonth}`}
                             title={`Delete Lorry ${id} from this month`}
                             onClick={(e) => deleteLorryEntries(e, id)}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center text-lg font-bold leading-none text-red-400 opacity-0 pointer-events-none transition-opacity hover:text-red-600 focus:opacity-100 focus:pointer-events-auto group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center border border-red-200 bg-red-50 text-base font-bold leading-none text-red-600 hover:bg-red-100"
                           >
                             ×
                           </button>
@@ -1241,15 +1288,23 @@ function App() {
                       ))}
                     </div>
                     <div className="overflow-x-auto">
-                    <table className="w-full table-fixed text-left min-w-[640px]">
-                      <thead className="bg-slate-50 border-b text-xs font-bold text-slate-500 uppercase tracking-widest">
+                    <table className="w-full table-fixed text-left min-w-[760px]">
+                      <colgroup>
+                        <col className="w-[18%]" />
+                        <col className="w-[17%]" />
+                        <col className="w-[15%]" />
+                        <col className="w-[14%]" />
+                        <col className="w-[21%]" />
+                        <col className="w-[15%]" />
+                      </colgroup>
+                      <thead className="border-b bg-slate-50 text-[10px] font-bold uppercase tracking-widest text-slate-500">
                         <tr>
-                          <th className="px-3 py-6">Date</th>
-                          <th className="px-3 py-6 text-center">Time</th>
-                          <th className="px-3 py-6 text-center">Rest (H)</th>
-                          <th className="px-3 py-6 text-center">Billable</th>
-                          <th className="px-3 py-6 text-center">Fee</th>
-                          <th className="px-3 py-6 text-center">Action</th>
+                          <th className="px-4 py-4">Date</th>
+                          <th className="px-3 py-4 text-center">Time</th>
+                          <th className="px-3 py-4 text-center">Rest (H)</th>
+                          <th className="px-3 py-4 text-center">Billable</th>
+                          <th className="px-3 py-4 text-center">Fee</th>
+                          <th className="px-3 py-4 text-center">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1268,7 +1323,7 @@ function App() {
                                     />
                                   </td>
                                   <td className="p-3">
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-1 gap-2">
                                       <label className="text-[9px] font-bold uppercase text-slate-400">
                                         Work In
                                         <input
@@ -1290,7 +1345,7 @@ function App() {
                                     </div>
                                   </td>
                                   <td className="p-3 bg-amber-50/30">
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-1 gap-2">
                                       <label className="text-[9px] font-bold uppercase text-amber-700">
                                         Lunch Out
                                         <input
@@ -1322,20 +1377,20 @@ function App() {
                                   </td>
                                   <td className="p-3 text-right text-[10px] text-slate-400 italic">recalculated on save</td>
                                   <td className="p-3 text-center">
-                                    <div className="flex gap-2 justify-center">
-                                      <button onClick={() => saveEntryEdit(e.id)} className="bg-blue-600 text-white px-3 py-1 font-bold text-xs uppercase">Save</button>
-                                      <button onClick={() => setEditingEntryId(null)} className="text-slate-400 hover:text-slate-600 font-bold text-xs uppercase">Cancel</button>
+                                    <div className="flex flex-wrap gap-1.5 justify-center">
+                                      <button onClick={() => saveEntryEdit(e.id)} className="border border-blue-700 bg-blue-600 px-2.5 py-1.5 text-xs font-bold uppercase text-white hover:bg-blue-700">Save</button>
+                                      <button onClick={() => setEditingEntryId(null)} className="border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold uppercase text-slate-600 hover:bg-slate-50">Cancel</button>
                                     </div>
                                   </td>
                                 </>
                               ) : (
                                 <>
-                                  <td className="px-3 py-6 font-bold text-base text-slate-700">
-                                    {e.date}
+                                  <td className="px-4 py-4 font-bold text-sm whitespace-nowrap text-slate-700">
+                                    {String(e.date).split('-').reverse().join('/')}
                                     {e.isRain && <span className="ml-2 text-[9px] bg-blue-100 text-blue-600 font-black uppercase px-1.5 py-0.5 rounded tracking-wide">Rain</span>}
                                   </td>
-                                  <td className="px-3 py-6 text-center text-slate-500 font-mono text-sm">{e.timeRange}</td>
-                                  <td className="px-3 py-6 text-center font-bold text-red-400 text-base">
+                                  <td className="px-3 py-4 text-center text-slate-500 font-mono text-sm whitespace-nowrap">{e.timeRange}</td>
+                                  <td className="px-3 py-3 text-center font-bold text-red-500 text-sm">
                                     {e.rest.toFixed(1)}h
                                     {e.restOut && e.restIn && (
                                       <span className="block text-[10px] text-amber-600 font-mono mt-1">
@@ -1343,11 +1398,14 @@ function App() {
                                       </span>
                                     )}
                                   </td>
-                                  <td className="px-3 py-6 text-center font-black text-slate-800 text-base">{e.hours.toFixed(1)}h</td>
-                                  <td className="px-3 py-6 text-center font-black text-green-700 text-base">RM {e.total.toFixed(2)}</td>
-                                  <td className="px-3 py-6 text-center">
-                                    <div className="flex gap-3 justify-center">
+                                  <td className="px-3 py-4 text-center font-black text-slate-800 text-sm">{e.hours.toFixed(1)}h</td>
+                                  <td className="px-3 py-4 text-center font-black text-green-700 text-sm whitespace-nowrap">RM {e.total.toFixed(2)}</td>
+                                  <td className="px-3 py-4 text-center">
+                                    <div className="flex items-center justify-center gap-2">
                                       <button
+                                        type="button"
+                                        aria-label={`Edit entry for ${e.date}`}
+                                        title="Edit entry"
                                         onClick={() => {
                                           const [tIn, tOut] = e.timeRange.split('-');
                                           setEditingEntryId(e.id);
@@ -1360,15 +1418,18 @@ function App() {
                                             isRain: e.isRain,
                                           });
                                         }}
-                                        className="text-blue-400 hover:text-blue-600 font-bold text-xs tracking-widest uppercase transition-colors"
+                                        className="inline-flex h-8 w-8 items-center justify-center border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
                                       >
-                                        Edit
+                                        <EditIcon />
                                       </button>
                                       <button
+                                        type="button"
+                                        aria-label={`Remove entry for ${e.date}`}
+                                        title="Remove entry"
                                         onClick={() => deleteEntry(e.id)}
-                                        className="text-red-400 hover:text-red-600 font-bold text-xs tracking-widest uppercase transition-colors"
+                                        className="inline-flex h-8 w-8 items-center justify-center border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
                                       >
-                                        Remove
+                                        <TrashIcon />
                                       </button>
                                     </div>
                                   </td>
@@ -1380,9 +1441,9 @@ function App() {
                       </tbody>
                       <tfoot className="bg-blue-50 border-t-2 border-blue-200">
                         <tr>
-                          <td colSpan="3" className="px-3 py-6 font-black text-right uppercase text-sm text-blue-800">Monthly Total:</td>
-                          <td className="px-3 py-6 text-center font-black text-blue-700 text-lg">{totalMonthlyHours.toFixed(1)}h</td>
-                          <td className="px-3 py-6 text-center font-black text-green-700 text-xl">RM {totalMonthlyFees.toFixed(2)}</td>
+                          <td colSpan="3" className="px-4 py-4 font-black text-right uppercase text-xs text-blue-800">Monthly Total:</td>
+                          <td className="px-3 py-4 text-center font-black text-blue-700 text-base">{totalMonthlyHours.toFixed(1)}h</td>
+                          <td className="px-3 py-4 text-center font-black text-green-700 text-base whitespace-nowrap">RM {totalMonthlyFees.toFixed(2)}</td>
                           <td></td>
                         </tr>
                       </tfoot>
@@ -1395,6 +1456,7 @@ function App() {
           </div>
         )}
       </div>
+      <LegalLinks />
     </div>
   );
 }

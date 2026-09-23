@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from './supabaseClient';
+import { LegalLinks } from './LegalNotices';
 
 // Eye icons as inline SVG — no icon library needed
 const EyeOpen = () => (
@@ -33,7 +34,7 @@ function PasswordField({ label, value, onChange, placeholder = '•••••�
         <button
           type="button"
           onClick={() => setVisible((v) => !v)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors"
+          className="absolute right-2 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 transition-colors"
           tabIndex={-1}
         >
           {visible ? <EyeClosed /> : <EyeOpen />}
@@ -90,8 +91,9 @@ function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
-      <div className="bg-white border w-full max-w-md p-6 sm:p-12 shadow-sm">
+    <div className="min-h-screen bg-slate-100 flex flex-col p-4 pb-28 md:pb-16 font-sans">
+      <div className="flex flex-1 items-center justify-center">
+        <div className="bg-white border w-full max-w-md p-6 sm:p-12 shadow-sm">
 
         <div className="mb-10">
           <h1 className="text-4xl font-black uppercase tracking-tighter text-slate-800">
@@ -137,7 +139,7 @@ function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 text-white py-4 font-bold uppercase text-xs tracking-widest shadow disabled:opacity-50"
+            className="w-full border border-blue-700 bg-blue-600 text-white py-4 font-bold uppercase text-xs tracking-widest hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? 'Please wait...' : isSignUp ? 'Create Account' : 'Sign In'}
           </button>
@@ -145,12 +147,14 @@ function Login() {
 
         <button
           onClick={() => switchMode(!isSignUp)}
-          className="mt-6 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-blue-600 w-full text-center transition-colors"
+          className="mt-6 w-full border border-slate-300 bg-white px-4 py-2 text-center text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:border-blue-400 hover:text-blue-700 transition-colors"
         >
           {isSignUp ? 'Already have an account? Sign In' : 'No account? Create one'}
         </button>
 
+        </div>
       </div>
+      <LegalLinks />
     </div>
   );
 }
