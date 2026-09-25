@@ -117,12 +117,92 @@ const mapEntry = (row) => {
   };
 };
 
+function CameraCapture({ onClose, onCapture }) {
+  const videoRef = useRef(null);
+  const [cameraError, setCameraError] = useState('');
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let stream;
+    const video = videoRef.current;
+
+    const openCamera = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError('Camera access requires HTTPS or localhost. You can still upload an image.');
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: 'environment' } },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        if (video) video.srcObject = stream;
+      } catch (error) {
+        if (!cancelled) {
+          setCameraError(error.name === 'NotAllowedError'
+            ? 'Camera permission was denied. Allow access in your browser or upload an image.'
+            : 'Could not open a camera. Check that it is connected and not in use, or upload an image.');
+        }
+      }
+    };
+
+    openCamera();
+    return () => {
+      cancelled = true;
+      stream?.getTracks().forEach((track) => track.stop());
+      if (video) video.srcObject = null;
+    };
+  }, []);
+
+  const takePicture = () => {
+    const video = videoRef.current;
+    if (!video?.videoWidth || !video.videoHeight) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      if (!videoRef.current) return;
+      if (blob) onCapture(new File([blob], 'punch-card.jpg', { type: 'image/jpeg' }));
+      else setCameraError('Could not capture the picture. Please try again.');
+    }, 'image/jpeg', 0.95);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4" role="dialog" aria-modal="true" aria-label="Take a punch card picture">
+      <div className="w-full max-w-2xl bg-white p-4 shadow-2xl sm:p-6">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <h2 className="text-sm font-bold uppercase text-blue-700">Take a punch card picture</h2>
+          <button type="button" onClick={onClose} className="border border-slate-300 px-3 py-2 text-xs font-bold uppercase text-slate-700 hover:bg-slate-100">Cancel</button>
+        </div>
+        {cameraError ? (
+          <p role="alert" className="bg-red-50 p-4 text-sm text-red-700">{cameraError}</p>
+        ) : (
+          <>
+            <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setIsReady(true)} className="aspect-video w-full bg-slate-900 object-contain" />
+            <p className="mt-3 text-sm text-slate-600">Fit the full card in the frame and keep the writing well lit.</p>
+            <button type="button" disabled={!isReady} onClick={takePicture} className="mt-4 w-full bg-blue-600 px-4 py-3 text-sm font-bold uppercase text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+              {isReady ? 'Capture and scan' : 'Opening camera...'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   // --- 1. DATA CORE ---
   const [view, setView] = useState('home');
   const [activeSiteId, setActiveSiteId] = useState(null);
   const [showNewSiteForm, setShowNewSiteForm] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
   const [scanError, setScanError] = useState('');
   const [scanNotice, setScanNotice] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -159,7 +239,11 @@ function App() {
 
     const [{ data: wpRows, error: wpErr }, { data: entRows, error: entErr }] =
       await Promise.all([
-        supabase.from('workplaces').select('*').order('created_at'),
+        supabase
+          .from('workplaces')
+          .select('*')
+          .eq('owner_id', session.user.id)
+          .order('created_at'),
         supabase.from('entries').select('*').order('date', { ascending: false }),
       ]);
 
@@ -570,7 +654,7 @@ function App() {
         applied = parseOCRText(result.text);
       }
       if (applied === false) {
-        setScanError('No readable punch-card rows were found. Make sure the full card is visible and upload a clearer, well-lit image.');
+        setScanError('No readable punch-card rows were found. Make sure the full card is visible and try a clearer, well-lit image.');
       }
     } catch (err) {
       console.error('Cloud Error', err);
@@ -604,6 +688,11 @@ function App() {
     setLoriInput('');
     setScanError('');
     setScanNotice('');
+  };
+
+  const handleCameraCapture = (file) => {
+    setShowCamera(false);
+    processImage(file);
   };
 
   const changeMonth = (month) => {
@@ -1160,7 +1249,15 @@ function App() {
                             onClick={() => { setScanError(''); setScanNotice(''); fileInputRef.current.click(); }}
                             className="border border-blue-700 bg-blue-600 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            {isScanning ? 'Scanning...' : 'Scan Document'}
+                            {isScanning ? 'Scanning...' : 'Upload image'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isScanning}
+                            onClick={() => { setScanError(''); setScanNotice(''); setShowCamera(true); }}
+                            className="border border-blue-700 bg-white px-4 py-2 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            Take picture
                           </button>
                           <button type="button" disabled={isScanning} onClick={clearDraft} className="border border-red-200 bg-white px-3 py-2 text-xs font-bold uppercase text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">Clear</button>
                         </div>
@@ -1456,6 +1553,9 @@ function App() {
           </div>
         )}
       </div>
+      {showCamera && (
+        <CameraCapture onClose={() => setShowCamera(false)} onCapture={handleCameraCapture} />
+      )}
       <LegalLinks />
     </div>
   );
