@@ -135,7 +135,7 @@ function CameraCapture({ onClose, onCapture }) {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: { facingMode: { ideal: 'environment' } },
+          video: { facingMode: { ideal: 'environment' }, aspectRatio: { ideal: 3 / 4 } },
         });
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -163,9 +163,22 @@ function CameraCapture({ onClose, onCapture }) {
     const video = videoRef.current;
     if (!video?.videoWidth || !video.videoHeight) return;
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
+    const portraitRatio = 3 / 4;
+    const cropWidth = Math.min(video.videoWidth, video.videoHeight * portraitRatio);
+    const cropHeight = Math.min(video.videoHeight, video.videoWidth / portraitRatio);
+    canvas.width = Math.round(cropWidth);
+    canvas.height = Math.round(cropHeight);
+    canvas.getContext('2d').drawImage(
+      video,
+      (video.videoWidth - cropWidth) / 2,
+      (video.videoHeight - cropHeight) / 2,
+      cropWidth,
+      cropHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
     canvas.toBlob((blob) => {
       if (!videoRef.current) return;
       if (blob) onCapture(new File([blob], 'punch-card.jpg', { type: 'image/jpeg' }));
@@ -184,7 +197,7 @@ function CameraCapture({ onClose, onCapture }) {
           <p role="alert" className="bg-red-50 p-4 text-sm text-red-700">{cameraError}</p>
         ) : (
           <>
-            <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setIsReady(true)} className="aspect-video w-full bg-slate-900 object-contain" />
+            <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setIsReady(true)} className="mx-auto aspect-[3/4] w-full max-w-[45vh] bg-slate-900 object-cover" />
             <p className="mt-3 text-sm text-slate-600">Fit the full card in the frame and keep the writing well lit.</p>
             <button type="button" disabled={!isReady} onClick={takePicture} className="mt-4 w-full bg-blue-600 px-4 py-3 text-sm font-bold uppercase text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
               {isReady ? 'Capture and scan' : 'Opening camera...'}
