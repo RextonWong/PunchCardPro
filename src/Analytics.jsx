@@ -220,7 +220,7 @@ function Analytics({ workplaces, onBack }) {
 
       {/* ── Dark header bar ────────────────────────────────── */}
       <div className="bg-slate-900 text-white px-6 md:px-10 py-5 flex items-center justify-between">
-        <button onClick={onBack} className="text-slate-400 hover:text-white font-bold uppercase tracking-widest text-xs transition-colors">
+        <button onClick={onBack} className="border border-slate-600 bg-slate-800 px-3 py-2 text-slate-200 hover:border-slate-400 hover:text-white font-bold uppercase tracking-widest text-xs transition-colors">
           ← Dashboard
         </button>
         <div>
@@ -393,13 +393,13 @@ function Analytics({ workplaces, onBack }) {
                 <div className="flex gap-1 bg-slate-100 p-1 rounded">
                   <button
                     onClick={() => setLeaderSort('hours')}
-                    className={`px-3 py-1 text-[10px] font-bold uppercase rounded transition-colors ${leaderSort === 'hours' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+                    className={`border px-3 py-1 text-[10px] font-bold uppercase transition-colors ${leaderSort === 'hours' ? 'border-blue-200 bg-white text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-blue-200'}`}
                   >
                     By Hours
                   </button>
                   <button
                     onClick={() => setLeaderSort('revenue')}
-                    className={`px-3 py-1 text-[10px] font-bold uppercase rounded transition-colors ${leaderSort === 'revenue' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+                    className={`border px-3 py-1 text-[10px] font-bold uppercase transition-colors ${leaderSort === 'revenue' ? 'border-blue-200 bg-white text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-blue-200'}`}
                   >
                     By Revenue
                   </button>
