@@ -1011,6 +1011,7 @@ function App() {
                   e.preventDefault();
                   const effectiveNewSite = withFridayFallback(newSite);
                   const { error } = await supabase.from('workplaces').insert({
+                    owner_id: session.user.id,
                     name: newSite.name,
                     rate: newSite.rate,
                     rain_min: newSite.rainMin,

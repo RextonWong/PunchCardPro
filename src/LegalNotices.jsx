@@ -17,7 +17,7 @@ function PrivacyNotice() {
         <p className="mt-2"><strong>Purpose and sharing:</strong> data is used to operate the features above, secure the service, and troubleshoot errors. Supabase provides authentication/database hosting, and Google provides OCR processing. Upload only information you are authorised to process. Your information is not used for advertising.</p>
         <p className="mt-2"><strong>Retention and choices:</strong> ledger data remains in the service until you delete it or request account/data deletion. Uploaded images are processed for OCR; this app does not provide a user-facing image archive or a configured retention schedule for provider-side operational logs. Avoid uploading unnecessary personal details. Contact the operator to request access, correction, or deletion, subject to applicable law and records the operator must retain.</p>
         <p className="mt-2"><strong>Security and transfers:</strong> data may be processed outside Malaysia depending on provider infrastructure and configuration.</p>
-        <p className="mt-2"><strong>Contact:</strong> [Replace with the responsible organisation’s privacy contact email before public use].</p>
+        <p className="mt-2"><strong>Contact:</strong> Wong Lap Heng, <a href="mailto:rextonwonglapheng@gmail.com" className="text-blue-700 underline">rextonwonglapheng@gmail.com</a>, <a href="tel:+60179498208" className="text-blue-700 underline">017-949 8208</a>.</p>
       </section>
     </div>
   );
@@ -32,7 +32,7 @@ function TermsOfUse() {
         <p className="mt-2">Do not misuse the service, attempt unauthorised access, or upload unlawful, malicious, or unrelated content. The operator may suspend access when reasonably necessary to protect the service or its users.</p>
         <p className="mt-2">PunchCard Pro’s original software, interface, branding, and documentation are protected by applicable intellectual-property laws. Rights in third-party software and marks remain with their respective owners. Use of the service does not transfer ownership of either party’s materials.</p>
         <p className="mt-2">The service may change or be unavailable. To the extent permitted by law, the operator disclaims implied warranties and is not liable for indirect loss arising from use of the service. Nothing in these terms excludes liability that cannot lawfully be excluded or limits your statutory rights.</p>
-        <p className="mt-2">These terms are governed by the laws of Malaysia, subject to applicable consumer protections and the jurisdiction of Malaysian courts. For questions or complaints, contact [operator contact email].</p>
+        <p className="mt-2">These terms are governed by the laws of Malaysia, subject to applicable consumer protections and the jurisdiction of Malaysian courts. For questions or complaints, contact Wong Lap Heng at <a href="mailto:rextonwonglapheng@gmail.com" className="text-blue-700 underline">rextonwonglapheng@gmail.com</a> or <a href="tel:+60179498208" className="text-blue-700 underline">017-949 8208</a>.</p>
       </section>
     </div>
   );
