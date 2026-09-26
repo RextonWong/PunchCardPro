@@ -5,9 +5,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Change this to a newer model (e.g. a Gemini 3.x flash model) once your
-// key has access — nothing else needs to change.
-const GEMINI_MODEL = 'gemini-2.5-flash'
+// Gemini 3.8 Flash is the primary structured OCR engine.
+const GEMINI_MODEL = 'gemini-3.8-flash'
 
 const EXTRACTION_PROMPT = `Inspect the entire image. It may contain one, two, or more Malaysian lorry punch cards (handwritten daily timesheets), including cards placed side-by-side, above one another, tilted, or partly overlapping. Each physical card normally covers half a month. Treat every separate physical punch card as a separate item and do not merge cards while reading them.
 
@@ -75,7 +74,6 @@ serve(async (req) => {
               }],
               generationConfig: {
                 response_mime_type: 'application/json',
-                temperature: 0,
               },
             }),
           }
