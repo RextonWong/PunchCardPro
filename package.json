@@ -1,6 +1,8 @@
 {
   "name": "lori-hantu-dashboard",
   "private": true,
+  "author": "Wong Lap Heng <rextonwonglapheng@gmail.com>",
+  "license": "UNLICENSED",
   "version": "0.0.0",
   "type": "module",
   "scripts": {
