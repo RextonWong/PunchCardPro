@@ -638,21 +638,21 @@ function App() {
     try {
       setIsScanning(true);
       const base64Image = await preprocessImage(file);
-      const response = await fetch(
-        'https://lpfxlrqrllpvlkmarham.supabase.co/functions/v1/ocr-scanner',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization':
-              'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwZnhscnFybGxwdmxrbWFyaGFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjgwNjcsImV4cCI6MjA5MjI0NDA2N30.0s2c8_4TdjY6Lw7vhdA36coDUNkyUbOGlDAZ8sha2bo',
-          },
-          body: JSON.stringify({ image: base64Image }),
-        }
-      );
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || result.error) {
-        throw new Error(result.error || 'The image could not be read. Please try a clearer punch-card photo.');
+      // invoke() sends the signed-in user's session token, so the edge
+      // function can tell which account is scanning.
+      const { data: result, error: invokeError } = await supabase.functions.invoke('ocr-scanner', {
+        body: { image: base64Image },
+      });
+      if (invokeError) {
+        const errorBody = await invokeError.context?.json?.().catch(() => null);
+        throw new Error(
+          invokeError.context?.status === 401
+            ? 'Your session has expired. Please sign out and sign in again.'
+            : errorBody?.error || 'The image could not be read. Please try a clearer punch-card photo.'
+        );
+      }
+      if (!result || result.error) {
+        throw new Error(result?.error || 'The image could not be read. Please try a clearer punch-card photo.');
       }
 
       let applied = false;
