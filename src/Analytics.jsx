@@ -123,7 +123,9 @@ function DonutChart({ data, centerValue, centerLabel, height = 220 }) {
 function Analytics({ workplaces, onBack }) {
   const today = new Date();
   const defaultTo   = today.toISOString().substring(0, 7);
-  const defaultFrom = new Date(today.getFullYear(), today.getMonth() - 5, 1).toISOString().substring(0, 7);
+  // Present the current year-to-date by default. This keeps the Jan-Jun
+  // presentation history visible and automatically includes July imports.
+  const defaultFrom = `${today.getFullYear()}-01`;
 
   const [filterSite, setFilterSite] = useState('all');
   const [filterFrom, setFilterFrom] = useState(defaultFrom);
@@ -194,7 +196,6 @@ function Analytics({ workplaces, onBack }) {
   }, [filteredEntries, leaderSort]);
 
   const maxHours   = lorryData[0]?.hours   || 1;
-  const maxRevenue = lorryData[0]?.revenue || 1;
 
   // ── Site data ────────────────────────────────────────────────
   const siteData = useMemo(() => {

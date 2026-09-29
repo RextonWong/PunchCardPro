@@ -73,7 +73,7 @@ export function LegalLinks() {
   return (
     <>
       <footer className="fixed inset-x-0 bottom-0 z-40 mx-auto flex w-full max-w-[1800px] flex-wrap items-center justify-center gap-x-5 gap-y-2 bg-slate-100 px-4 py-4 text-xs text-slate-500">
-        <span>© 2026 PunchCard Pro. All rights reserved.</span>
+        <span>© 2026 Wong Lap Heng. PunchCard Pro. All rights reserved.</span>
         {Object.entries(documents).map(([id, label]) => (
           <button key={id} type="button" onClick={() => setOpen(id)} className="underline underline-offset-2 hover:text-blue-700">{label}</button>
         ))}

@@ -1004,7 +1004,7 @@ function App() {
             <div className="bg-white w-full max-w-4xl p-6 sm:p-10 shadow-2xl rounded-sm border max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-8 border-b pb-4">
                 <h3 className="font-bold text-xs uppercase text-blue-600">Site Configuration</h3>
-                <button onClick={() => setShowNewSiteForm(false)} className="text-2xl">&times;</button>
+                <button type="button" aria-label="Close site configuration" onClick={() => setShowNewSiteForm(false)} className="flex h-9 w-9 items-center justify-center border border-slate-200 bg-white text-2xl text-slate-600 hover:bg-slate-50">&times;</button>
               </div>
               <form
                 onSubmit={async (e) => {
