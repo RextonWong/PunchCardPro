@@ -120,7 +120,7 @@ function DonutChart({ data, centerValue, centerLabel, height = 220 }) {
 }
 
 // ── Main component ────────────────────────────────────────────
-function Analytics({ workplaces, onBack }) {
+function Analytics({ workplaces, onBack, onRefresh, isRefreshing, syncError }) {
   const today = new Date();
   const defaultTo   = today.toISOString().substring(0, 7);
   // Present the current year-to-date by default. This keeps the Jan-Jun
@@ -220,38 +220,37 @@ function Analytics({ workplaces, onBack }) {
     <div className="min-h-screen bg-slate-100 font-sans text-slate-700">
 
       {/* ── Dark header bar ────────────────────────────────── */}
-      <div className="bg-slate-900 text-white px-6 md:px-10 py-5 flex items-center justify-between">
-        <button onClick={onBack} className="border border-slate-600 bg-slate-800 px-3 py-2 text-slate-200 hover:border-slate-400 hover:text-white font-bold uppercase tracking-widest text-xs transition-colors">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900 px-4 py-4 text-white md:px-10 md:py-5">
+        <button onClick={onBack} className="min-h-10 border border-slate-600 bg-slate-800 px-3 py-2 text-slate-200 hover:border-slate-400 hover:text-white font-bold uppercase tracking-widest text-xs transition-colors">
           ← Dashboard
         </button>
-        <div>
-          <h2 className="text-xl font-black uppercase tracking-tighter text-center">Analytics</h2>
-        </div>
-        <div className="w-24" />
+        <h2 className="order-first w-full text-xl font-black uppercase tracking-tighter sm:order-none sm:w-auto">Analytics</h2>
+        <button type="button" onClick={() => onRefresh()} disabled={isRefreshing} className="min-h-10 border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{isRefreshing ? 'Refreshing…' : 'Refresh data'}</button>
       </div>
 
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
+        {syncError && <p role="alert" className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{syncError}</p>}
 
         {/* ── Filters ────────────────────────────────────────── */}
-        <div className="bg-white border shadow-sm p-5 flex flex-wrap gap-5 items-end">
-          <div>
+        <div className="grid gap-4 border bg-white p-4 shadow-sm sm:flex sm:flex-wrap sm:items-end sm:gap-5 sm:p-5">
+          <div className="min-w-0">
             <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Site</label>
             <select
               value={filterSite}
               onChange={(e) => setFilterSite(e.target.value)}
-              className="border px-4 py-2 text-xs font-bold outline-none bg-white cursor-pointer focus:border-blue-600"
+              className="min-h-11 w-full border bg-white px-4 py-2 text-sm font-bold outline-none focus:border-blue-600 sm:w-auto sm:text-xs"
             >
               <option value="all">All Sites</option>
               {workplaces.map((wp) => <option key={wp.id} value={wp.id}>{wp.name}</option>)}
             </select>
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">From</label>
-            <input type="month" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="border px-4 py-2 text-xs font-bold outline-none focus:border-blue-600 cursor-pointer" />
+            <input type="month" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className="min-h-11 w-full border px-4 py-2 text-sm font-bold outline-none focus:border-blue-600 sm:w-auto sm:text-xs" />
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">To</label>
-            <input type="month" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="border px-4 py-2 text-xs font-bold outline-none focus:border-blue-600 cursor-pointer" />
+            <input type="month" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className="min-h-11 w-full border px-4 py-2 text-sm font-bold outline-none focus:border-blue-600 sm:w-auto sm:text-xs" />
           </div>
           <p className="text-[10px] text-slate-400 uppercase font-bold self-end pb-2">
             Comparing to {fmtMonth(prevFrom)} – {fmtMonth(prevTo)}
@@ -406,7 +405,19 @@ function Analytics({ workplaces, onBack }) {
                   </button>
                 </div>
               </div>
-              <div className="overflow-x-auto">
+              <div className="divide-y md:hidden">
+                {lorryData.map((lorry, index) => (
+                  <div key={lorry.id} className="p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <strong className="text-slate-800">#{index + 1} · {lorry.id}</strong>
+                      <strong className="text-green-700">{fmtRM(lorry.revenue)}</strong>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600">{lorry.days} days · {lorry.hours.toFixed(1)}h · {lorry.rainDays} rain days</p>
+                  </div>
+                ))}
+                <div className="bg-blue-50 p-4 text-sm font-bold text-blue-700">Total: {totalHours.toFixed(1)}h · {fmtRM(totalRevenue)}</div>
+              </div>
+              <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-left min-w-[560px]">
                 <thead className="bg-slate-50 border-b text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                   <tr>

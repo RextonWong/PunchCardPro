@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
 import Analytics from './Analytics';
@@ -212,6 +212,7 @@ function CameraCapture({ onClose, onCapture }) {
 function App() {
   // --- 1. DATA CORE ---
   const [view, setView] = useState('home');
+  const [mobileSection, setMobileSection] = useState('entry');
   const [activeSiteId, setActiveSiteId] = useState(null);
   const [showNewSiteForm, setShowNewSiteForm] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -219,7 +220,13 @@ function App() {
   const [scanError, setScanError] = useState('');
   const [scanNotice, setScanNotice] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
   const fileInputRef = useRef(null);
+  const refreshInFlightRef = useRef(null);
+  const refreshQueuedRef = useRef(false);
+  const currentUserIdRef = useRef(null);
 
   const [workplaces, setWorkplaces] = useState([]);
 
@@ -230,52 +237,106 @@ function App() {
   useEffect(() => {
     // Restore existing session on page load
     supabase.auth.getSession().then(({ data: { session } }) => {
+      currentUserIdRef.current = session?.user?.id ?? null;
       setSession(session ?? null);
     });
     // Keep session in sync whenever the user signs in or out
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (currentUserIdRef.current !== (session?.user?.id ?? null)) refreshQueuedRef.current = false;
+      currentUserIdRef.current = session?.user?.id ?? null;
       setSession(session ?? null);
     });
     return () => subscription.unsubscribe();
   }, []);
 
-  // Load data only once a valid session exists
+  // Refresh saved data without replacing an unsaved monthly draft or ledger edit.
+  // Page through entries so the default 1,000-row API limit cannot hide older data.
+  const loadData = useCallback(async ({ initial = false } = {}) => {
+    const userId = session?.user?.id;
+    if (!userId) return false;
+    if (refreshInFlightRef.current === userId) {
+      refreshQueuedRef.current = true;
+      return false;
+    }
+    refreshInFlightRef.current = userId;
+    if (initial) setIsLoading(true);
+    else setIsRefreshing(true);
+
+    try {
+      const { data: wpRows, error: wpErr } = await supabase
+        .from('workplaces')
+        .select('*')
+        .eq('owner_id', userId)
+        .order('created_at');
+      if (wpErr) throw wpErr;
+
+      const workplaceIds = wpRows.map((wp) => wp.id);
+      const entRows = [];
+      if (workplaceIds.length > 0) {
+        const pageSize = 1000;
+        for (let offset = 0; ; offset += pageSize) {
+          const { data, error } = await supabase
+            .from('entries')
+            .select('*')
+            .in('workplace_id', workplaceIds)
+            .order('date', { ascending: false })
+            .order('id')
+            .range(offset, offset + pageSize - 1);
+          if (error) throw error;
+          entRows.push(...data);
+          if (data.length < pageSize) break;
+        }
+      }
+
+      const entriesByWorkplace = new Map(workplaceIds.map((id) => [id, []]));
+      entRows.forEach((entry) => entriesByWorkplace.get(entry.workplace_id)?.push(mapEntry(entry)));
+      if (currentUserIdRef.current !== userId) return false;
+      setWorkplaces(wpRows.map((wp) => ({
+        ...mapWorkplace(wp),
+        entries: entriesByWorkplace.get(wp.id),
+      })));
+      setSyncError('');
+      setLastSyncedAt(new Date());
+      return true;
+    } catch (error) {
+      console.error('Supabase load error', error);
+      if (currentUserIdRef.current === userId) {
+        setSyncError('Could not refresh saved data. Check your connection and try Refresh.');
+      }
+      return false;
+    } finally {
+      if (refreshInFlightRef.current === userId) {
+        refreshInFlightRef.current = null;
+        setIsLoading(false);
+        setIsRefreshing(false);
+        if (refreshQueuedRef.current && currentUserIdRef.current === userId) {
+          refreshQueuedRef.current = false;
+          queueMicrotask(() => loadData());
+        }
+      }
+    }
+  }, [session?.user?.id]);
+
   useEffect(() => {
-    if (session) loadData();
-  }, [session]);
-
-  // Fetch all workplaces and their entries from Supabase.
-  // Called on session start and after every mutation so local state
-  // always reflects the database exactly.
-  const loadData = async () => {
-    setIsLoading(true);
-
-    const [{ data: wpRows, error: wpErr }, { data: entRows, error: entErr }] =
-      await Promise.all([
-        supabase
-          .from('workplaces')
-          .select('*')
-          .eq('owner_id', session.user.id)
-          .order('created_at'),
-        supabase.from('entries').select('*').order('date', { ascending: false }),
-      ]);
-
-    if (wpErr || entErr) {
-      console.error('Supabase load error', wpErr || entErr);
-      setIsLoading(false);
+    if (!session?.user?.id) {
+      setWorkplaces([]);
       return;
     }
-
-    // Nest each entry inside its parent workplace so the rest of the
-    // app can keep using activeSite.entries without any changes.
-    const mapped = wpRows.map((wp) => ({
-      ...mapWorkplace(wp),
-      entries: entRows.filter((e) => e.workplace_id === wp.id).map(mapEntry),
-    }));
-
-    setWorkplaces(mapped);
-    setIsLoading(false);
-  };
+    loadData({ initial: true });
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') loadData();
+    };
+    const interval = window.setInterval(refreshWhenVisible, 30000);
+    window.addEventListener('focus', refreshWhenVisible);
+    window.addEventListener('online', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshWhenVisible);
+      window.removeEventListener('online', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [session?.user?.id, loadData]);
 
 
   // --- 2. INPUT & UI STATE ---
@@ -772,6 +833,7 @@ function App() {
     setLoriInput('');
     setScanError('');
     setScanNotice('');
+    setMobileSection('ledger');
   };
 
   // --- 6. DELETION LOGIC ---
@@ -846,6 +908,19 @@ function App() {
     if (error) { console.error('Entry update error', error); return; }
     setEditingEntryId(null);
     await loadData();
+  };
+
+  const startEditingEntry = (entry) => {
+    const [timeIn, timeOut] = entry.timeRange.split('-');
+    setEditingEntryId(entry.id);
+    setEditingValues({
+      date: entry.date,
+      in: toTimeInputValue(timeIn),
+      restOut: toTimeInputValue(entry.restOut),
+      restIn: toTimeInputValue(entry.restIn),
+      out: toTimeInputValue(timeOut),
+      isRain: entry.isRain,
+    });
   };
 
   // Open the site edit modal pre-filled with the current site's values
@@ -983,7 +1058,7 @@ function App() {
 
   // Analytics page renders outside the main container so it controls its own layout
   if (view === 'analytics') {
-    return <Analytics workplaces={workplaces} onBack={() => setView('home')} />;
+    return <Analytics workplaces={workplaces} onBack={() => setView('home')} onRefresh={loadData} isRefreshing={isRefreshing} syncError={syncError} />;
   }
 
   if (isLoading) {
@@ -997,6 +1072,16 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 p-3 pb-28 md:p-6 md:pb-16 font-sans text-slate-700">
       <div className="w-full max-w-[1800px] flex-1 mx-auto">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border bg-white px-3 py-2 text-xs text-slate-600 sm:px-4">
+          <span className="min-w-0 truncate">Signed in as <strong>{session.user.email}</strong></span>
+          <div className="flex items-center gap-3">
+            {lastSyncedAt && <span className="text-slate-400">Updated {lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+            <button type="button" onClick={() => loadData()} disabled={isRefreshing} className="min-h-10 border border-blue-200 px-3 font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+              {isRefreshing ? 'Refreshing…' : 'Refresh data'}
+            </button>
+          </div>
+        </div>
+        {syncError && <p role="alert" className="mb-4 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{syncError}</p>}
 
         {/* MODAL: New Site */}
         {showNewSiteForm && (
@@ -1183,6 +1268,7 @@ function App() {
                     setSelMonth(month);
                     setPreviewBatch(createMonthBatch(month));
                     setView('workplace');
+                    setMobileSection('entry');
                     setLoriInput('');
                     setEditingEntryId(null);
                   }}
@@ -1232,10 +1318,15 @@ function App() {
               </button>
             </header>
 
+            <div className="grid grid-cols-2 gap-2 md:hidden" aria-label="Workplace view">
+              <button type="button" onClick={() => setMobileSection('entry')} className={`min-h-11 border px-3 text-xs font-bold uppercase ${mobileSection === 'entry' ? 'border-blue-700 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-600'}`}>Monthly entry</button>
+              <button type="button" onClick={() => setMobileSection('ledger')} className={`min-h-11 border px-3 text-xs font-bold uppercase ${mobileSection === 'ledger' ? 'border-blue-700 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-600'}`}>Ledger</button>
+            </div>
+
             <div className="grid grid-cols-1 2xl:grid-cols-12 gap-4 lg:gap-6">
 
               {/* LEFT COLUMN: Scanner & Preview */}
-              <div className="2xl:col-span-5 space-y-4">
+              <div className={`${mobileSection === 'entry' ? '' : 'hidden'} space-y-4 md:block 2xl:col-span-5`}>
 
                 {scanError && (
                   <div role="alert" className="border border-red-300 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
@@ -1256,12 +1347,12 @@ function App() {
                           <h3 className="font-bold text-sm uppercase text-blue-600">Monthly Entry</h3>
                           <p className="text-xs text-slate-500">{filledDays} of {previewBatch.length} days filled</p>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center sm:gap-3">
                           <button
                             type="button"
                             disabled={isScanning}
                             onClick={() => { setScanError(''); setScanNotice(''); fileInputRef.current.click(); }}
-                            className="border border-blue-700 bg-blue-600 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="min-h-11 border border-blue-700 bg-blue-600 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {isScanning ? 'Scanning...' : 'Upload image'}
                           </button>
@@ -1269,11 +1360,11 @@ function App() {
                             type="button"
                             disabled={isScanning}
                             onClick={() => { setScanError(''); setScanNotice(''); setShowCamera(true); }}
-                            className="border border-blue-700 bg-white px-4 py-2 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="min-h-11 border border-blue-700 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             Take picture
                           </button>
-                          <button type="button" disabled={isScanning} onClick={clearDraft} className="border border-red-200 bg-white px-3 py-2 text-xs font-bold uppercase text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">Clear</button>
+                          <button type="button" disabled={isScanning} onClick={clearDraft} className="col-span-2 min-h-10 border border-red-200 bg-white px-3 py-2 text-xs font-bold uppercase text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:col-span-1">Clear</button>
                         </div>
                       </div>
                       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
@@ -1285,9 +1376,9 @@ function App() {
                       />
                     </div>
 
-                    <div className="overflow-y-auto overflow-x-auto flex-grow p-4">
-                      <table className="w-full text-left text-xs min-w-[620px]">
-                        <thead className="sticky top-0 bg-white shadow-sm text-[10px] text-slate-400 uppercase tracking-widest">
+                    <div className="flex-grow overflow-y-auto p-3 sm:overflow-x-auto sm:p-4">
+                      <table className="block w-full text-left text-xs sm:table sm:min-w-[620px]">
+                        <thead className="sticky top-0 hidden bg-white shadow-sm text-[10px] text-slate-400 uppercase tracking-widest sm:table-header-group">
                           <tr>
                             <th className="py-3 px-2">Date</th>
                             <th className="py-3 px-2 text-center">Time In</th>
@@ -1297,55 +1388,70 @@ function App() {
                             <th className="py-3 px-2 text-center">Rain</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
+                        <tbody className="block space-y-3 sm:table-row-group sm:divide-y sm:divide-slate-100 sm:space-y-0">
                           {previewBatch.map((day) => (
-                            <tr key={day.id} className="hover:bg-blue-50/50 transition-colors">
-                              <td className="py-2 px-2">
-                                <span className="block whitespace-nowrap font-mono text-slate-600">{day.date.split('-').reverse().join('/')}</span>
+                            <tr key={day.id} className={`grid grid-cols-2 gap-2 rounded border p-3 transition-colors hover:bg-blue-50/50 sm:table-row sm:border-0 sm:p-0 ${hasDayInput(day) ? 'border-blue-200 bg-blue-50/30' : 'border-slate-200'}`}>
+                              <td className="col-span-2 px-1 pb-1 pt-0 sm:table-cell sm:px-2 sm:py-2">
+                                <span className="block whitespace-nowrap font-bold text-slate-700 sm:font-mono sm:font-normal sm:text-slate-600">{day.date.split('-').reverse().join('/')}</span>
                               </td>
-                              <td className="py-2 px-2">
+                              <td className="block sm:table-cell sm:px-2 sm:py-2">
+                                <label className="block text-[10px] font-bold uppercase text-slate-500 sm:hidden" htmlFor={`${day.id}-in`}>Time In</label>
                                 <input
+                                  id={`${day.id}-in`}
                                   value={day.in}
                                   onChange={(e) => updateBatchTime(day.id, 'in', e.target.value)}
                                   placeholder="0800"
-                                  className="w-full border text-center font-mono p-2 outline-none focus:border-blue-500 bg-white"
+                                  inputMode="numeric"
+                                  className="mt-1 w-full min-w-0 rounded border bg-white p-2 text-center font-mono text-base outline-none focus:border-blue-500 sm:mt-0 sm:text-xs"
                                   maxLength="4"
                                 />
                               </td>
-                              <td className="py-2 px-2">
+                              <td className="block sm:table-cell sm:px-2 sm:py-2">
+                                <label className="block text-[10px] font-bold uppercase text-slate-500 sm:hidden" htmlFor={`${day.id}-rest-out`}>Rest Out</label>
                                 <input
+                                  id={`${day.id}-rest-out`}
                                   value={day.restOut}
                                   onChange={(e) => updateBatchTime(day.id, 'restOut', e.target.value)}
                                   placeholder="1300"
-                                  className="w-full border text-center font-mono p-2 outline-none focus:border-amber-500 bg-amber-50/30"
+                                  inputMode="numeric"
+                                  className="mt-1 w-full min-w-0 rounded border bg-amber-50/30 p-2 text-center font-mono text-base outline-none focus:border-amber-500 sm:mt-0 sm:text-xs"
                                   maxLength="4"
                                 />
                               </td>
-                              <td className="py-2 px-2">
+                              <td className="block sm:table-cell sm:px-2 sm:py-2">
+                                <label className="block text-[10px] font-bold uppercase text-slate-500 sm:hidden" htmlFor={`${day.id}-rest-in`}>Rest In</label>
                                 <input
+                                  id={`${day.id}-rest-in`}
                                   value={day.restIn}
                                   onChange={(e) => updateBatchTime(day.id, 'restIn', e.target.value)}
                                   placeholder="1400"
-                                  className="w-full border text-center font-mono p-2 outline-none focus:border-amber-500 bg-amber-50/30"
+                                  inputMode="numeric"
+                                  className="mt-1 w-full min-w-0 rounded border bg-amber-50/30 p-2 text-center font-mono text-base outline-none focus:border-amber-500 sm:mt-0 sm:text-xs"
                                   maxLength="4"
                                 />
                               </td>
-                              <td className="py-2 px-2 w-1/4">
+                              <td className="block sm:table-cell sm:px-2 sm:py-2">
+                                <label className="block text-[10px] font-bold uppercase text-slate-500 sm:hidden" htmlFor={`${day.id}-out`}>Time Out</label>
                                 <input
+                                  id={`${day.id}-out`}
                                   value={day.out}
                                   onChange={(e) => updateBatchTime(day.id, 'out', e.target.value)}
                                   placeholder="1900"
-                                  className="w-full border text-center font-mono p-2 outline-none focus:border-blue-500 bg-white"
+                                  inputMode="numeric"
+                                  className="mt-1 w-full min-w-0 rounded border bg-white p-2 text-center font-mono text-base outline-none focus:border-blue-500 sm:mt-0 sm:text-xs"
                                   maxLength="4"
                                 />
                               </td>
-                              <td className="py-2 px-2 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={day.isRain}
-                                  onChange={() => toggleRainDay(day.id)}
-                                  className="w-5 h-5 accent-blue-600 cursor-pointer"
-                                />
+                              <td className="col-span-2 px-1 pt-1 sm:table-cell sm:px-2 sm:py-2 sm:text-center">
+                                <label className="flex min-h-10 items-center gap-2 text-xs font-bold text-slate-600 sm:justify-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={day.isRain}
+                                    onChange={() => toggleRainDay(day.id)}
+                                    className="h-5 w-5 cursor-pointer accent-blue-600"
+                                  />
+                                  <span className="sm:sr-only">Rain day</span>
+                                </label>
                               </td>
                             </tr>
                           ))}
@@ -1372,9 +1478,9 @@ function App() {
               </div>
 
               {/* RIGHT COLUMN: Ledger Table */}
-              <div className="2xl:col-span-7 bg-white border shadow-sm min-h-[500px]">
+              <div className={`${mobileSection === 'ledger' ? '' : 'hidden'} border bg-white shadow-sm md:block md:min-h-[500px] 2xl:col-span-7`}>
                 {lorisInMonth.length === 0 ? (
-                  <div className="p-16 sm:p-40 text-center text-slate-300 italic uppercase font-light">Empty Ledger</div>
+                  <div className="p-12 text-center font-light uppercase italic text-slate-400 sm:p-40">Empty Ledger</div>
                 ) : (
                   <>
                     <div className="flex overflow-x-auto gap-2 border-b bg-slate-50 p-2">
@@ -1398,7 +1504,61 @@ function App() {
                         </div>
                       ))}
                     </div>
-                    <div className="overflow-x-auto">
+                    <div className="space-y-3 p-3 md:hidden">
+                      {displayedEntries.map((entry) => (
+                        <article key={entry.id} className="rounded border border-slate-200 bg-white p-4 shadow-sm">
+                          {editingEntryId === entry.id ? (
+                            <div className="space-y-3">
+                              <h3 className="text-sm font-bold text-blue-700">Edit {entry.date.split('-').reverse().join('/')}</h3>
+                              <label className="block text-xs font-bold text-slate-600">Date
+                                <input type="date" value={editingValues.date} onChange={(event) => setEditingValues({ ...editingValues, date: event.target.value })} className="mt-1 min-h-11 w-full rounded border p-2 text-base" />
+                              </label>
+                              <div className="grid grid-cols-2 gap-3">
+                                {[
+                                  ['Work In', 'in'], ['Work Out', 'out'],
+                                  ['Rest Out', 'restOut'], ['Rest In', 'restIn'],
+                                ].map(([label, field]) => (
+                                  <label key={field} className="block text-xs font-bold text-slate-600">{label}
+                                    <input type="time" value={editingValues[field]} onChange={(event) => setEditingValues({ ...editingValues, [field]: event.target.value })} className="mt-1 min-h-11 w-full min-w-0 rounded border p-2 text-base" />
+                                  </label>
+                                ))}
+                              </div>
+                              <label className="flex min-h-11 items-center gap-2 text-sm font-medium text-slate-700">
+                                <input type="checkbox" checked={editingValues.isRain} onChange={(event) => setEditingValues({ ...editingValues, isRain: event.target.checked })} className="h-5 w-5 accent-blue-600" /> Rain day
+                              </label>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button type="button" onClick={() => saveEntryEdit(entry.id)} className="min-h-11 rounded border border-blue-700 bg-blue-600 px-3 text-sm font-bold text-white">Save</button>
+                                <button type="button" onClick={() => setEditingEntryId(null)} className="min-h-11 rounded border border-slate-300 px-3 text-sm font-bold text-slate-600">Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <h3 className="font-bold text-slate-800">{entry.date.split('-').reverse().join('/')}</h3>
+                                  <p className="mt-1 font-mono text-sm text-slate-600">{entry.timeRange}</p>
+                                  {entry.isRain && <span className="mt-1 inline-block rounded bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-700">Rain</span>}
+                                </div>
+                                <strong className="whitespace-nowrap text-base text-green-700">RM {entry.total.toFixed(2)}</strong>
+                              </div>
+                              <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-3 text-sm">
+                                <p><span className="block text-xs text-slate-500">Billable</span><strong>{entry.hours.toFixed(1)}h</strong></p>
+                                <p><span className="block text-xs text-slate-500">Rest</span><strong>{entry.rest.toFixed(1)}h</strong>{entry.restOut && entry.restIn && <span className="block font-mono text-xs text-amber-700">{entry.restOut}-{entry.restIn}</span>}</p>
+                              </div>
+                              <div className="mt-3 grid grid-cols-2 gap-2">
+                                <button type="button" onClick={() => startEditingEntry(entry)} className="min-h-11 rounded border border-blue-200 bg-blue-50 px-3 text-sm font-bold text-blue-700">Edit</button>
+                                <button type="button" onClick={() => deleteEntry(entry.id)} className="min-h-11 rounded border border-red-200 bg-red-50 px-3 text-sm font-bold text-red-700">Remove</button>
+                              </div>
+                            </>
+                          )}
+                        </article>
+                      ))}
+                      <div className="rounded border border-blue-200 bg-blue-50 p-4 text-sm">
+                        <p className="flex justify-between gap-3"><span>Total hours</span><strong>{totalMonthlyHours.toFixed(1)}h</strong></p>
+                        <p className="mt-2 flex justify-between gap-3 text-green-700"><span>Total fee</span><strong>RM {totalMonthlyFees.toFixed(2)}</strong></p>
+                      </div>
+                    </div>
+                    <div className="hidden overflow-x-auto md:block">
                     <table className="w-full table-fixed text-left min-w-[760px]">
                       <colgroup>
                         <col className="w-[18%]" />
@@ -1517,18 +1677,7 @@ function App() {
                                         type="button"
                                         aria-label={`Edit entry for ${e.date}`}
                                         title="Edit entry"
-                                        onClick={() => {
-                                          const [tIn, tOut] = e.timeRange.split('-');
-                                          setEditingEntryId(e.id);
-                                          setEditingValues({
-                                            date: e.date,
-                                            in: toTimeInputValue(tIn),
-                                            restOut: toTimeInputValue(e.restOut),
-                                            restIn: toTimeInputValue(e.restIn),
-                                            out: toTimeInputValue(tOut),
-                                            isRain: e.isRain,
-                                          });
-                                        }}
+                                        onClick={() => startEditingEntry(e)}
                                         className="inline-flex h-8 w-8 items-center justify-center border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
                                       >
                                         <EditIcon />
