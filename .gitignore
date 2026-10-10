@@ -4,6 +4,8 @@
 
 # Playwright screenshots (may contain PII)
 scripts/screenshots/
+test-results/
+playwright-report/
 
 # Logs
 logs
