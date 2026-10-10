@@ -4,6 +4,7 @@ import { supabase } from './supabaseClient';
 import Analytics from './Analytics';
 import Login from './Login';
 import { LegalLinks } from './LegalNotices';
+import { buildMonthlyWorkbook, monthlyExportFileName } from './exportWorkbook';
 
 // PostgreSQL TIME columns return "HH:MM:SS" — trim to "HH:MM" for <input type="time">
 const pgTime = (t) => (t ? t.slice(0, 5) : '');
@@ -223,10 +224,16 @@ function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [syncError, setSyncError] = useState('');
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  const [exportError, setExportError] = useState('');
+  const [exportDownload, setExportDownload] = useState(null);
   const fileInputRef = useRef(null);
   const refreshInFlightRef = useRef(null);
   const refreshQueuedRef = useRef(false);
   const currentUserIdRef = useRef(null);
+
+  useEffect(() => () => {
+    if (exportDownload) URL.revokeObjectURL(exportDownload.url);
+  }, [exportDownload]);
 
   const [workplaces, setWorkplaces] = useState([]);
 
@@ -1002,38 +1009,24 @@ function App() {
   };
 
   const exportExcel = () => {
-    if (!activeSite) return;
-    const wb = XLSX.utils.book_new();
-    const daysInSelectedMonth = createMonthBatch(selMonth).length;
-    lorisInMonth.forEach((id) => {
-      const rows = [
-        ['LAND VISION TRADING'],
-        [activeSite.name.toUpperCase()],
-        [selMonth],
-        [`LORI ID: ${id}`],
-        [''],
-        ['DAY', 'IN', 'OUT', 'REST', 'TOTAL'],
-      ];
-      let total = 0;
-      for (let d = 1; d <= daysInSelectedMonth; d++) {
-        const dStr = `${selMonth}-${String(d).padStart(2, '0')}`;
-        const entry = siteEntries.find((i) => String(i.date) === dStr && i.loriId === id);
-        if (entry) {
-          const t = entry.timeRange.split('-');
-          rows.push([d, t[0], t[1], entry.rest.toFixed(1), entry.hours.toFixed(1)]);
-          total += entry.hours;
-        } else {
-          rows.push([d, '-', '-', '0.0', '0.0']);
-        }
-      }
-      rows.push(
-        [''],
-        ['TOTAL HOURS', '', '', '', total.toFixed(1)],
-        ['TOTAL FEE', '', '', '', 'RM ' + (total * activeSite.rate).toFixed(2)]
-      );
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), id);
-    });
-    XLSX.writeFile(wb, `${activeSite.name}_${selMonth}.xlsx`);
+    setExportError('');
+    try {
+      if (!activeSite) throw new Error('Open a site before exporting.');
+      const workbook = buildMonthlyWorkbook(activeSite, selMonth);
+      const fileName = monthlyExportFileName(activeSite.name, selMonth);
+      const bytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      setExportDownload({ url, fileName, siteId: activeSite.id, month: selMonth });
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      console.error('Excel export failed', error);
+      setExportError(error.message || 'Export failed. Please try again.');
+    }
   };
 
   // --- PREPARE LEDGER TOTALS ---
@@ -1306,7 +1299,7 @@ function App() {
               }} className="border border-blue-200 bg-white px-3 py-2 text-blue-700 font-bold uppercase tracking-wide text-xs hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50">← Dashboard</button>
               <div className="flex flex-wrap gap-3 sm:gap-4">
                 <input type="month" value={selMonth} disabled={isScanning} onChange={(e) => changeMonth(e.target.value)} className="bg-white border px-4 py-2 font-bold outline-none text-xs uppercase cursor-pointer disabled:opacity-50" />
-                <button onClick={exportExcel} className="border border-green-800 bg-green-700 text-white px-5 py-2 font-black text-xs uppercase hover:bg-green-800">Excel Export</button>
+                <button onClick={exportExcel} disabled={lorisInMonth.length === 0} title={lorisInMonth.length ? 'Export saved entries for this month' : 'No saved entries in this month'} className="border border-green-800 bg-green-700 text-white px-5 py-2 font-black text-xs uppercase hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50">Excel Export</button>
               </div>
             </div>
 
@@ -1323,10 +1316,14 @@ function App() {
               <button type="button" onClick={() => setMobileSection('ledger')} className={`min-h-11 border px-3 text-xs font-bold uppercase ${mobileSection === 'ledger' ? 'border-blue-700 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-600'}`}>Ledger</button>
             </div>
 
-            <div className="grid grid-cols-1 2xl:grid-cols-12 gap-4 lg:gap-6">
+            {exportError && <p role="alert" className="border border-red-200 bg-red-50 p-3 text-sm text-red-700">{exportError}</p>}
+            {exportDownload?.siteId === activeSite.id && exportDownload.month === selMonth && (
+              <p role="status" className="border border-green-200 bg-green-50 p-3 text-sm text-green-800">Your Excel file is ready. If the download did not start, <a href={exportDownload.url} download={exportDownload.fileName} className="font-bold underline">download the Excel file</a>.</p>
+            )}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
 
               {/* LEFT COLUMN: Scanner & Preview */}
-              <div className={`${mobileSection === 'entry' ? '' : 'hidden'} space-y-4 md:block 2xl:col-span-5`}>
+              <div className={`${mobileSection === 'entry' ? '' : 'hidden'} min-w-0 space-y-4 md:block`}>
 
                 {scanError && (
                   <div role="alert" className="border border-red-300 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
@@ -1478,7 +1475,7 @@ function App() {
               </div>
 
               {/* RIGHT COLUMN: Ledger Table */}
-              <div className={`${mobileSection === 'ledger' ? '' : 'hidden'} border bg-white shadow-sm md:block md:min-h-[500px] 2xl:col-span-7`}>
+              <div className={`${mobileSection === 'ledger' ? '' : 'hidden'} min-w-0 border bg-white shadow-sm md:block md:min-h-[500px]`}>
                 {lorisInMonth.length === 0 ? (
                   <div className="p-12 text-center font-light uppercase italic text-slate-400 sm:p-40">Empty Ledger</div>
                 ) : (
