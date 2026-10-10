@@ -26,6 +26,8 @@ The old handler also threw `Workbook is empty` for a month with no saved entries
 
 The fix sanitizes/truncates sheet names and resolves collisions without changing the lorry ID written inside the sheet. Empty-month export is disabled. Failures appear in the UI, and every successful generation leaves a direct download link to use when an automatic download is blocked. Export fees sum the recorded ledger fees so they agree with the ledger even after rate changes.
 
+The successful-export message appears as a notification at the top right, with a close button and the direct download link. It fits phone widths and reappears on the next export after dismissal.
+
 ## OTP policy and added safeguards
 
 - Codes expire after 300 seconds and allow 3 guesses, enforced atomically in PostgreSQL.

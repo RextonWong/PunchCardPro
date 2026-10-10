@@ -1292,7 +1292,13 @@ function App() {
 
             {exportError && <p role="alert" className="border border-red-200 bg-red-50 p-3 text-sm text-red-700">{exportError}</p>}
             {exportDownload?.siteId === activeSite.id && exportDownload.month === selMonth && (
-              <p role="status" className="border border-green-200 bg-green-50 p-3 text-sm text-green-800">Your Excel file is ready. If the download did not start, <a href={exportDownload.url} download={exportDownload.fileName} className="font-bold underline">download the Excel file</a>.</p>
+              <div className="fixed inset-x-3 top-3 z-50 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900 shadow-lg sm:left-auto sm:right-6 sm:top-6 sm:w-96">
+                <div role="status" className="min-w-0 flex-1">
+                  <p className="font-bold">Your Excel file is ready</p>
+                  <p className="mt-1">If the download did not start, <a href={exportDownload.url} download={exportDownload.fileName} className="font-bold underline">download the Excel file</a>.</p>
+                </div>
+                <button type="button" aria-label="Close export notification" onClick={() => setExportDownload(null)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded text-2xl leading-none text-green-800 hover:bg-green-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700">&times;</button>
+              </div>
             )}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
 
