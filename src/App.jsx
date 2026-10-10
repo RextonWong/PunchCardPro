@@ -221,9 +221,7 @@ function App() {
   const [scanError, setScanError] = useState('');
   const [scanNotice, setScanNotice] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [syncError, setSyncError] = useState('');
-  const [lastSyncedAt, setLastSyncedAt] = useState(null);
   const [exportError, setExportError] = useState('');
   const [exportDownload, setExportDownload] = useState(null);
   const fileInputRef = useRef(null);
@@ -267,7 +265,6 @@ function App() {
     }
     refreshInFlightRef.current = userId;
     if (initial) setIsLoading(true);
-    else setIsRefreshing(true);
 
     try {
       const { data: wpRows, error: wpErr } = await supabase
@@ -303,19 +300,17 @@ function App() {
         entries: entriesByWorkplace.get(wp.id),
       })));
       setSyncError('');
-      setLastSyncedAt(new Date());
       return true;
     } catch (error) {
       console.error('Supabase load error', error);
       if (currentUserIdRef.current === userId) {
-        setSyncError('Could not refresh saved data. Check your connection and try Refresh.');
+        setSyncError('Could not load saved data. Check your connection and reload the page.');
       }
       return false;
     } finally {
       if (refreshInFlightRef.current === userId) {
         refreshInFlightRef.current = null;
         setIsLoading(false);
-        setIsRefreshing(false);
         if (refreshQueuedRef.current && currentUserIdRef.current === userId) {
           refreshQueuedRef.current = false;
           queueMicrotask(() => loadData());
@@ -330,19 +325,6 @@ function App() {
       return;
     }
     loadData({ initial: true });
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') loadData();
-    };
-    const interval = window.setInterval(refreshWhenVisible, 30000);
-    window.addEventListener('focus', refreshWhenVisible);
-    window.addEventListener('online', refreshWhenVisible);
-    document.addEventListener('visibilitychange', refreshWhenVisible);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', refreshWhenVisible);
-      window.removeEventListener('online', refreshWhenVisible);
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
-    };
   }, [session?.user?.id, loadData]);
 
 
@@ -1051,7 +1033,7 @@ function App() {
 
   // Analytics page renders outside the main container so it controls its own layout
   if (view === 'analytics') {
-    return <Analytics workplaces={workplaces} onBack={() => setView('home')} onRefresh={loadData} isRefreshing={isRefreshing} syncError={syncError} />;
+    return <Analytics workplaces={workplaces} onBack={() => setView('home')} syncError={syncError} />;
   }
 
   if (isLoading) {
@@ -1065,15 +1047,7 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 p-3 pb-28 md:p-6 md:pb-16 font-sans text-slate-700">
       <div className="w-full max-w-[1800px] flex-1 mx-auto">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border bg-white px-3 py-2 text-xs text-slate-600 sm:px-4">
-          <span className="min-w-0 truncate">Signed in as <strong>{session.user.email}</strong></span>
-          <div className="flex items-center gap-3">
-            {lastSyncedAt && <span className="text-slate-400">Updated {lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
-            <button type="button" onClick={() => loadData()} disabled={isRefreshing} className="min-h-10 border border-blue-200 px-3 font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
-              {isRefreshing ? 'Refreshing…' : 'Refresh data'}
-            </button>
-          </div>
-        </div>
+        <p className="mb-3 truncate text-xs text-slate-500">Signed in as {session.user.email}</p>
         {syncError && <p role="alert" className="mb-4 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{syncError}</p>}
 
         {/* MODAL: New Site */}

@@ -120,7 +120,7 @@ function DonutChart({ data, centerValue, centerLabel, height = 220 }) {
 }
 
 // ── Main component ────────────────────────────────────────────
-function Analytics({ workplaces, onBack, onRefresh, isRefreshing, syncError }) {
+function Analytics({ workplaces, onBack, syncError }) {
   const today = new Date();
   const defaultTo   = today.toISOString().substring(0, 7);
   // Present the current year-to-date by default. This keeps the Jan-Jun
@@ -225,7 +225,6 @@ function Analytics({ workplaces, onBack, onRefresh, isRefreshing, syncError }) {
           ← Dashboard
         </button>
         <h2 className="order-first w-full text-xl font-black uppercase tracking-tighter sm:order-none sm:w-auto">Analytics</h2>
-        <button type="button" onClick={() => onRefresh()} disabled={isRefreshing} className="min-h-10 border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{isRefreshing ? 'Refreshing…' : 'Refresh data'}</button>
       </div>
 
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">

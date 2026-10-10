@@ -160,6 +160,8 @@ function Login() {
           </p>
         </div>
 
+        {isLocalSupabase && <p className="mb-5 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Local test mode uses separate accounts. Create a test account here and verify it with <strong>123321</strong>. Your production account and data are separate.</p>}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label htmlFor="auth-email" className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Email</label>

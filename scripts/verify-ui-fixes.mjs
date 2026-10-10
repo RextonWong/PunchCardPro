@@ -10,7 +10,7 @@ const fixtureModule = `
 const month = '${month}';
 const site = { id: 'site-1', name: 'Sample Worksite', rate: 80, rain_min: 4, l_start: '13:00:00', l_end: '14:00:00', l_threshold: '14:30:00', f_start: '13:00:00', f_end: '14:00:00', f_threshold: '14:30:00' };
 const entries = ['LD/2','LD:2'].map((lorry, index) => ({ id: 'entry-' + index, workplace_id: 'site-1', lori_id: lorry, date: month + '-01', time_range: '0800-1700', hours: 8, rest: 1, total: 640, is_rain: false }));
-const query = (table) => { const result = { data: table === 'workplaces' ? [site] : entries, error: null }; const chain = new Proxy({}, { get(_target, prop) { return prop === 'then' ? (resolve, reject) => Promise.resolve(result).then(resolve, reject) : () => chain; }}); return chain; };
+const query = (table) => { window.qaReadCount = (window.qaReadCount || 0) + 1; const result = { data: table === 'workplaces' ? [site] : [...entries, ...JSON.parse(localStorage.getItem('qa-remote-entries') || '[]')], error: null }; const chain = new Proxy({}, { get(_target, prop) { return prop === 'then' ? (resolve, reject) => Promise.resolve(result).then(resolve, reject) : () => chain; }}); return chain; };
 export const isLocalSupabase = true;
 export const supabase = { auth: { getSession: async () => ({ data: { session: window.qaLoggedOut ? null : { user: { id: 'sample-user', email: 'sample@example.com' } } } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }), signInWithPassword: async () => ({ error: null }) }, from: query,
  functions: { invoke: async (_name, { body }) => {
@@ -25,6 +25,7 @@ writeFileSync(baselinePath, execFileSync('git', ['show', 'origin/main:src/App.js
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1100 } });
+  await page.clock.install();
   await page.route('**/src/supabaseClient.js', (route) => route.fulfill({ contentType: 'application/javascript', body: fixtureModule }));
   await page.route('**/src/App.jsx', async (route) => {
     const response = await route.fetch({ url: `${baseUrl}/src/.qa-baseline.jsx` });
@@ -54,6 +55,15 @@ try {
   await page.locator('input[type="month"]').fill('2025-01');
   assert.equal(await page.getByRole('button', { name: 'Excel Export' }).isDisabled(), true);
   await page.locator('input[type="month"]').fill(month);
+  assert.equal(await page.getByRole('button', { name: 'Refresh data' }).count(), 0);
+  const readCount = await page.evaluate(() => window.qaReadCount);
+  await page.evaluate(() => { window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('online')); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.clock.fastForward(31000);
+  assert.equal(await page.evaluate(() => window.qaReadCount), readCount, 'Focus and elapsed time must not refresh data');
+  await page.evaluate((selectedMonth) => localStorage.setItem('qa-remote-entries', JSON.stringify([{ id: 'remote', workplace_id: 'site-1', lori_id: 'REMOTE', date: selectedMonth + '-01', time_range: '0800-1700', hours: 8, rest: 1, total: 640, is_rain: false }])), month);
+  await page.reload();
+  await page.getByText('Sample Worksite').click();
+  await page.getByText('Lorry REMOTE', { exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Ledger', exact: true }).click();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -84,7 +94,7 @@ try {
   await login.screenshot({ path: 'scripts/screenshots/recovery-phone-after.png', fullPage: true });
   await login.getByRole('button', { name: 'Verify & Reset Password' }).click();
   await login.getByText('Password changed. Sign in with your new password.').waitFor();
-  console.log('PASS: readable browser download with colliding IDs; equal desktop panels; no phone overflow; signup/recovery screens and error feedback. Auth API responses mocked for UI proof.');
+  console.log('PASS: readable browser downloads; equal panels; no phone overflow; data refreshes on page reload with no polling/focus refresh or Refresh button; signup/recovery screens and error feedback. Auth API responses mocked for UI proof.');
 } finally {
   await browser.close();
   unlinkSync(baselinePath);

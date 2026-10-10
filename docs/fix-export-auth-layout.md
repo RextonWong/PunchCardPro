@@ -42,6 +42,10 @@ The fix sanitizes/truncates sheet names and resolves collisions without changing
 
 Local sandbox Auth is isolated from production. Its code is always **123321**. The server enables this only when its Supabase URL is local HTTP (`localhost`, `127.0.0.1`, or local Docker `kong`); a request or frontend flag cannot enable it on hosted Supabase.
 
+Production credentials do not sign in to the local database. Create a separate local test account first; the sign-in screen explains this in local mode.
+
+Saved data is fetched on sign-in/page reload and after local saves. The Refresh data controls, update timestamp, interval polling, and focus/visibility/online refresh listeners have been removed. To see another device's latest saved data, reload the page. A small account label remains to identify the signed-in account.
+
 With Docker Desktop running:
 
 ```powershell
@@ -70,6 +74,7 @@ Verified on this branch:
 - Real local SQL checks passed for five-minute expiry, three guesses, reuse, resend invalidation, the five-code cooldown, IP cap, and table/RPC privileges.
 - Real local Auth checks passed for signup after two mistakes, three concurrent wrong guesses exhausting a code, no unverified account, no direct native signup bypass, recovery, old-password rejection, new-password sign-in, and revocation of the old refresh session.
 - A phone browser registered using `123321` and signed in to the actual local app with no auth mocks.
+- A browser check confirmed page reload reads newly saved remote entries, while focus/online/visibility events and 31 seconds of elapsed time do not fetch data. Refresh controls are absent.
 
 Real production SMTP delivery remains a rollout verification item. Local Auth ran v2.188.1 while hosted Auth reported v2.197.0; check the deployed Auth configuration and real email flow during rollout.
 
