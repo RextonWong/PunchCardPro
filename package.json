@@ -7,6 +7,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:sandbox": "vite --mode sandbox",
+    "sandbox:setup": "node scripts/setup-auth-sandbox.mjs",
+    "test:fixes": "node --test tests/*.test.mjs",
+    "test:auth:sandbox": "node scripts/verify-auth-sandbox.mjs",
+    "test:ui:fixes": "node scripts/verify-ui-fixes.mjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

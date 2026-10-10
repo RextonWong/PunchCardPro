@@ -4,6 +4,7 @@ import { supabase } from './supabaseClient';
 import Analytics from './Analytics';
 import Login from './Login';
 import { LegalLinks } from './LegalNotices';
+import { buildMonthlyWorkbook, monthlyExportFileName } from './exportWorkbook';
 
 // PostgreSQL TIME columns return "HH:MM:SS" — trim to "HH:MM" for <input type="time">
 const pgTime = (t) => (t ? t.slice(0, 5) : '');
@@ -220,13 +221,17 @@ function App() {
   const [scanError, setScanError] = useState('');
   const [scanNotice, setScanNotice] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [syncError, setSyncError] = useState('');
-  const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  const [exportError, setExportError] = useState('');
+  const [exportDownload, setExportDownload] = useState(null);
   const fileInputRef = useRef(null);
   const refreshInFlightRef = useRef(null);
   const refreshQueuedRef = useRef(false);
   const currentUserIdRef = useRef(null);
+
+  useEffect(() => () => {
+    if (exportDownload) URL.revokeObjectURL(exportDownload.url);
+  }, [exportDownload]);
 
   const [workplaces, setWorkplaces] = useState([]);
 
@@ -260,7 +265,6 @@ function App() {
     }
     refreshInFlightRef.current = userId;
     if (initial) setIsLoading(true);
-    else setIsRefreshing(true);
 
     try {
       const { data: wpRows, error: wpErr } = await supabase
@@ -296,19 +300,17 @@ function App() {
         entries: entriesByWorkplace.get(wp.id),
       })));
       setSyncError('');
-      setLastSyncedAt(new Date());
       return true;
     } catch (error) {
       console.error('Supabase load error', error);
       if (currentUserIdRef.current === userId) {
-        setSyncError('Could not refresh saved data. Check your connection and try Refresh.');
+        setSyncError('Could not load saved data. Check your connection and reload the page.');
       }
       return false;
     } finally {
       if (refreshInFlightRef.current === userId) {
         refreshInFlightRef.current = null;
         setIsLoading(false);
-        setIsRefreshing(false);
         if (refreshQueuedRef.current && currentUserIdRef.current === userId) {
           refreshQueuedRef.current = false;
           queueMicrotask(() => loadData());
@@ -323,19 +325,6 @@ function App() {
       return;
     }
     loadData({ initial: true });
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') loadData();
-    };
-    const interval = window.setInterval(refreshWhenVisible, 30000);
-    window.addEventListener('focus', refreshWhenVisible);
-    window.addEventListener('online', refreshWhenVisible);
-    document.addEventListener('visibilitychange', refreshWhenVisible);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', refreshWhenVisible);
-      window.removeEventListener('online', refreshWhenVisible);
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
-    };
   }, [session?.user?.id, loadData]);
 
 
@@ -1002,38 +991,24 @@ function App() {
   };
 
   const exportExcel = () => {
-    if (!activeSite) return;
-    const wb = XLSX.utils.book_new();
-    const daysInSelectedMonth = createMonthBatch(selMonth).length;
-    lorisInMonth.forEach((id) => {
-      const rows = [
-        ['LAND VISION TRADING'],
-        [activeSite.name.toUpperCase()],
-        [selMonth],
-        [`LORI ID: ${id}`],
-        [''],
-        ['DAY', 'IN', 'OUT', 'REST', 'TOTAL'],
-      ];
-      let total = 0;
-      for (let d = 1; d <= daysInSelectedMonth; d++) {
-        const dStr = `${selMonth}-${String(d).padStart(2, '0')}`;
-        const entry = siteEntries.find((i) => String(i.date) === dStr && i.loriId === id);
-        if (entry) {
-          const t = entry.timeRange.split('-');
-          rows.push([d, t[0], t[1], entry.rest.toFixed(1), entry.hours.toFixed(1)]);
-          total += entry.hours;
-        } else {
-          rows.push([d, '-', '-', '0.0', '0.0']);
-        }
-      }
-      rows.push(
-        [''],
-        ['TOTAL HOURS', '', '', '', total.toFixed(1)],
-        ['TOTAL FEE', '', '', '', 'RM ' + (total * activeSite.rate).toFixed(2)]
-      );
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), id);
-    });
-    XLSX.writeFile(wb, `${activeSite.name}_${selMonth}.xlsx`);
+    setExportError('');
+    try {
+      if (!activeSite) throw new Error('Open a site before exporting.');
+      const workbook = buildMonthlyWorkbook(activeSite, selMonth);
+      const fileName = monthlyExportFileName(activeSite.name, selMonth);
+      const bytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      setExportDownload({ url, fileName, siteId: activeSite.id, month: selMonth });
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (error) {
+      console.error('Excel export failed', error);
+      setExportError(error.message || 'Export failed. Please try again.');
+    }
   };
 
   // --- PREPARE LEDGER TOTALS ---
@@ -1058,7 +1033,7 @@ function App() {
 
   // Analytics page renders outside the main container so it controls its own layout
   if (view === 'analytics') {
-    return <Analytics workplaces={workplaces} onBack={() => setView('home')} onRefresh={loadData} isRefreshing={isRefreshing} syncError={syncError} />;
+    return <Analytics workplaces={workplaces} onBack={() => setView('home')} syncError={syncError} />;
   }
 
   if (isLoading) {
@@ -1072,15 +1047,7 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 p-3 pb-28 md:p-6 md:pb-16 font-sans text-slate-700">
       <div className="w-full max-w-[1800px] flex-1 mx-auto">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border bg-white px-3 py-2 text-xs text-slate-600 sm:px-4">
-          <span className="min-w-0 truncate">Signed in as <strong>{session.user.email}</strong></span>
-          <div className="flex items-center gap-3">
-            {lastSyncedAt && <span className="text-slate-400">Updated {lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
-            <button type="button" onClick={() => loadData()} disabled={isRefreshing} className="min-h-10 border border-blue-200 px-3 font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
-              {isRefreshing ? 'Refreshing…' : 'Refresh data'}
-            </button>
-          </div>
-        </div>
+        <p className="mb-3 truncate text-xs text-slate-500">Signed in as {session.user.email}</p>
         {syncError && <p role="alert" className="mb-4 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{syncError}</p>}
 
         {/* MODAL: New Site */}
@@ -1306,7 +1273,7 @@ function App() {
               }} className="border border-blue-200 bg-white px-3 py-2 text-blue-700 font-bold uppercase tracking-wide text-xs hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50">← Dashboard</button>
               <div className="flex flex-wrap gap-3 sm:gap-4">
                 <input type="month" value={selMonth} disabled={isScanning} onChange={(e) => changeMonth(e.target.value)} className="bg-white border px-4 py-2 font-bold outline-none text-xs uppercase cursor-pointer disabled:opacity-50" />
-                <button onClick={exportExcel} className="border border-green-800 bg-green-700 text-white px-5 py-2 font-black text-xs uppercase hover:bg-green-800">Excel Export</button>
+                <button onClick={exportExcel} disabled={lorisInMonth.length === 0} title={lorisInMonth.length ? 'Export saved entries for this month' : 'No saved entries in this month'} className="border border-green-800 bg-green-700 text-white px-5 py-2 font-black text-xs uppercase hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50">Excel Export</button>
               </div>
             </div>
 
@@ -1323,10 +1290,20 @@ function App() {
               <button type="button" onClick={() => setMobileSection('ledger')} className={`min-h-11 border px-3 text-xs font-bold uppercase ${mobileSection === 'ledger' ? 'border-blue-700 bg-blue-600 text-white' : 'border-slate-300 bg-white text-slate-600'}`}>Ledger</button>
             </div>
 
-            <div className="grid grid-cols-1 2xl:grid-cols-12 gap-4 lg:gap-6">
+            {exportError && <p role="alert" className="border border-red-200 bg-red-50 p-3 text-sm text-red-700">{exportError}</p>}
+            {exportDownload?.siteId === activeSite.id && exportDownload.month === selMonth && (
+              <div className="fixed inset-x-3 top-3 z-50 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900 shadow-lg sm:left-auto sm:right-6 sm:top-6 sm:w-96">
+                <div role="status" className="min-w-0 flex-1">
+                  <p className="font-bold">Your Excel file is ready</p>
+                  <p className="mt-1">If the download did not start, <a href={exportDownload.url} download={exportDownload.fileName} className="font-bold underline">download the Excel file</a>.</p>
+                </div>
+                <button type="button" aria-label="Close export notification" onClick={() => setExportDownload(null)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded text-2xl leading-none text-green-800 hover:bg-green-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700">&times;</button>
+              </div>
+            )}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
 
               {/* LEFT COLUMN: Scanner & Preview */}
-              <div className={`${mobileSection === 'entry' ? '' : 'hidden'} space-y-4 md:block 2xl:col-span-5`}>
+              <div className={`${mobileSection === 'entry' ? '' : 'hidden'} min-w-0 space-y-4 md:block`}>
 
                 {scanError && (
                   <div role="alert" className="border border-red-300 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
@@ -1478,7 +1455,7 @@ function App() {
               </div>
 
               {/* RIGHT COLUMN: Ledger Table */}
-              <div className={`${mobileSection === 'ledger' ? '' : 'hidden'} border bg-white shadow-sm md:block md:min-h-[500px] 2xl:col-span-7`}>
+              <div className={`${mobileSection === 'ledger' ? '' : 'hidden'} min-w-0 border bg-white shadow-sm md:block md:min-h-[500px]`}>
                 {lorisInMonth.length === 0 ? (
                   <div className="p-12 text-center font-light uppercase italic text-slate-400 sm:p-40">Empty Ledger</div>
                 ) : (
