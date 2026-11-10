@@ -1,16 +1,24 @@
-# React + Vite
+# PunchCard Pro
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+PunchCard Pro records lorry punch-card hours and fees by site and month. Signed-in users can scan cards, review entries, manage site billing rules, and export monthly Excel workbooks.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm install
+npm run dev
+npm run lint
+npm run build
+```
 
-## React Compiler
+The frontend uses Supabase Auth and account-scoped `workplaces` and `entries` tables. Apply the migrations in `supabase/migrations/` to the linked Supabase project before using the corresponding features.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Settings
 
-## Expanding the ESLint configuration
+Open **Settings** from the dashboard after signing in. Account settings allow email and password changes. Preferences store a display name and an optional default site to open after sign-in.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Spreadsheet settings choose a company heading, a separate worksheet per lorry or one worksheet with lorries stacked vertically, whether to include days without entries, and whether to include a totals summary. In combined mode the summary appears above the lorry tables; in separate mode it has its own worksheet. Existing accounts retain the original separate-tab, full-month export until they change these settings.
+
+The Data section downloads a JSON backup of the currently loaded sites, entries, and settings. It does not include account credentials. The backup button is disabled if data or settings failed to load, to avoid an incomplete export.
+
+Settings are stored per account in `public.user_settings`, added by `20261110151141_user_settings.sql`. Site rates, rain minimums, and rest rules remain in each site's configuration.
