@@ -3,8 +3,10 @@ import * as XLSX from 'xlsx';
 import { supabase } from './supabaseClient';
 import Analytics from './Analytics';
 import Login from './Login';
+import Settings from './Settings';
 import { LegalLinks } from './LegalNotices';
 import { buildMonthlyWorkbook, monthlyExportFileName } from './exportWorkbook';
+import { defaultSettings, fromSettingsRow, toSettingsRow } from './userSettings';
 
 // PostgreSQL TIME columns return "HH:MM:SS" — trim to "HH:MM" for <input type="time">
 const pgTime = (t) => (t ? t.slice(0, 5) : '');
@@ -228,6 +230,10 @@ function App() {
   const refreshInFlightRef = useRef(null);
   const refreshQueuedRef = useRef(false);
   const currentUserIdRef = useRef(null);
+  const autoOpenedUserRef = useRef(null);
+  const [settings, setSettings] = useState(defaultSettings);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
 
   useEffect(() => () => {
     if (exportDownload) URL.revokeObjectURL(exportDownload.url);
@@ -247,7 +253,14 @@ function App() {
     });
     // Keep session in sync whenever the user signs in or out
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (currentUserIdRef.current !== (session?.user?.id ?? null)) refreshQueuedRef.current = false;
+      if (currentUserIdRef.current !== (session?.user?.id ?? null)) {
+        refreshQueuedRef.current = false;
+        setView('home');
+        setActiveSiteId(null);
+        setWorkplaces([]);
+        setSettings(defaultSettings);
+        setSettingsLoaded(false);
+      }
       currentUserIdRef.current = session?.user?.id ?? null;
       setSession(session ?? null);
     });
@@ -327,6 +340,39 @@ function App() {
     loadData({ initial: true });
   }, [session?.user?.id, loadData]);
 
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId) {
+      setSettings(defaultSettings);
+      setSettingsLoaded(false);
+      setSettingsError('');
+      autoOpenedUserRef.current = null;
+      return;
+    }
+    let active = true;
+    setSettingsLoaded(false);
+    setSettings(defaultSettings);
+    supabase.from('user_settings').select('*').eq('user_id', userId).maybeSingle()
+      .then(({ data, error }) => {
+        if (!active || currentUserIdRef.current !== userId) return;
+        if (error) {
+          console.error('Settings load error', error);
+          setSettingsError('Could not load account settings. Exports will use the defaults until this is fixed.');
+        } else {
+          setSettings(fromSettingsRow(data));
+          setSettingsError('');
+        }
+        setSettingsLoaded(true);
+      })
+      .catch((error) => {
+        if (!active || currentUserIdRef.current !== userId) return;
+        console.error('Settings load error', error);
+        setSettingsError('Could not load account settings. Exports will use the defaults until this is fixed.');
+        setSettingsLoaded(true);
+      });
+    return () => { active = false; };
+  }, [session?.user?.id]);
+
 
   // --- 2. INPUT & UI STATE ---
   const [loriInput, setLoriInput] = useState('');
@@ -362,6 +408,21 @@ function App() {
 
   const activeSite = workplaces.find((s) => s.id === activeSiteId) || null;
   const siteEntries = activeSite?.entries || [];
+
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId || !settingsLoaded || isLoading || autoOpenedUserRef.current === userId) return;
+    autoOpenedUserRef.current = userId;
+    if (view !== 'home') return;
+    const site = workplaces.find((item) => item.id === settings.defaultSiteId);
+    if (!site) return;
+    const latestMonth = [...new Set(site.entries.map((entry) => String(entry.date).substring(0, 7)))].sort().at(-1);
+    const month = latestMonth || new Date().toISOString().substring(0, 7);
+    setActiveSiteId(site.id);
+    setSelMonth(month);
+    setPreviewBatch(createMonthBatch(month));
+    setView('workplace');
+  }, [session?.user?.id, settingsLoaded, isLoading, settings.defaultSiteId, workplaces, view]);
 
   const lorisInMonth = [...new Set(
     siteEntries.filter((e) => String(e.date).startsWith(selMonth)).map((e) => e.loriId)
@@ -833,6 +894,7 @@ function App() {
       const { error } = await supabase.from('workplaces').delete().eq('id', siteId);
       if (error) { console.error('Delete site error', error); return; }
       if (activeSiteId === siteId) setView('home');
+      if (settings.defaultSiteId === siteId) setSettings({ ...settings, defaultSiteId: null });
       await loadData();
     }
   };
@@ -994,7 +1056,7 @@ function App() {
     setExportError('');
     try {
       if (!activeSite) throw new Error('Open a site before exporting.');
-      const workbook = buildMonthlyWorkbook(activeSite, selMonth);
+      const workbook = buildMonthlyWorkbook(activeSite, selMonth, settings);
       const fileName = monthlyExportFileName(activeSite.name, selMonth);
       const bytes = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
       const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
@@ -1009,6 +1071,36 @@ function App() {
       console.error('Excel export failed', error);
       setExportError(error.message || 'Export failed. Please try again.');
     }
+  };
+
+  const saveSettings = async (nextSettings) => {
+    const userId = session?.user?.id;
+    if (!userId) throw new Error('Sign in before saving settings.');
+    if (nextSettings.defaultSiteId && !workplaces.some((site) => site.id === nextSettings.defaultSiteId)) {
+      throw new Error('Choose one of your sites as the default.');
+    }
+    const { error } = await supabase.from('user_settings').upsert(toSettingsRow(nextSettings, userId), { onConflict: 'user_id' });
+    if (error) throw error;
+    setSettings(nextSettings);
+    setSettingsError('');
+  };
+
+  const downloadAllData = () => {
+    const backup = {
+      format: 'punch-card-pro-backup-v1',
+      exportedAt: new Date().toISOString(),
+      accountEmail: session.user.email,
+      settings,
+      workplaces,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `PunchCardPro_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   };
 
   // --- PREPARE LEDGER TOTALS ---
@@ -1044,11 +1136,27 @@ function App() {
     );
   }
 
+
+  if (view === 'settings') {
+    return <Settings
+      session={session}
+      settings={settings}
+      settingsLoaded={settingsLoaded}
+      settingsError={settingsError}
+      dataReady={!syncError && settingsLoaded && !settingsError}
+      workplaces={workplaces}
+      onSave={saveSettings}
+      onDownloadData={downloadAllData}
+      onBack={() => setView('home')}
+    />;
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 p-3 pb-28 md:p-6 md:pb-16 font-sans text-slate-700">
       <div className="w-full max-w-[1800px] flex-1 mx-auto">
-        <p className="mb-3 truncate text-xs text-slate-500">Signed in as {session.user.email}</p>
+        <p className="mb-3 truncate text-xs text-slate-500">Signed in as {settings.displayName || session.user.email}</p>
         {syncError && <p role="alert" className="mb-4 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{syncError}</p>}
+        {settingsError && <p role="alert" className="mb-4 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{settingsError}</p>}
 
         {/* MODAL: New Site */}
         {showNewSiteForm && (
@@ -1219,6 +1327,7 @@ function App() {
               <h2 className="text-2xl sm:text-3xl font-bold tracking-tighter uppercase">Project Portfolio</h2>
               <div className="flex flex-wrap gap-3 items-center">
                 <button onClick={() => setView('analytics')} className="border-2 border-slate-300 text-slate-600 px-8 py-2 font-bold uppercase text-xs hover:border-blue-600 hover:text-blue-600 transition-colors">Analytics</button>
+                <button onClick={() => setView('settings')} className="border-2 border-slate-300 text-slate-600 px-8 py-2 font-bold uppercase text-xs hover:border-blue-600 hover:text-blue-600 transition-colors">Settings</button>
                 <button onClick={() => setShowNewSiteForm(true)} className="border border-blue-700 bg-blue-600 text-white px-8 py-2 font-bold uppercase text-xs hover:bg-blue-700">+ New Site</button>
                 <button onClick={() => supabase.auth.signOut()} className="border border-slate-300 bg-white px-4 py-2 text-slate-600 hover:border-red-300 hover:text-red-600 font-bold uppercase text-xs tracking-widest transition-colors">Sign Out</button>
               </div>
