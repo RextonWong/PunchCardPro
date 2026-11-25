@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "@supabase/supabase-js"
+import { createTrackedFetch } from './usage.mjs'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -69,6 +70,12 @@ serve(async (req) => {
     )
   }
 
+  const admin = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
+  const { data: control, error: controlError } = await admin.from('account_controls').select('suspended').eq('user_id', user.id).maybeSingle()
+  if (controlError || control?.suspended) return new Response(JSON.stringify({ error: controlError ? 'Account service unavailable.' : 'This account is suspended. Contact support.' }), { status: controlError ? 503 : 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+  const requestId = crypto.randomUUID()
+  const providerFetch = createTrackedFetch(admin, user.id, requestId)
+
   try {
     const { image } = await req.json()
     const GEMINI_KEY = Deno.env.get('GEMINI_API_KEY')
@@ -78,7 +85,7 @@ serve(async (req) => {
     //    structured rows directly — far better on messy handwriting.
     if (GEMINI_KEY) {
       try {
-        const response = await fetch(
+        const result = await providerFetch('gemini', GEMINI_MODEL,
           `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`,
           {
             method: 'POST',
@@ -96,7 +103,6 @@ serve(async (req) => {
             }),
           }
         )
-        const result = await response.json()
         const raw = result.candidates?.[0]?.content?.parts?.[0]?.text
         if (raw) {
           const parsed = JSON.parse(raw)
@@ -108,7 +114,7 @@ serve(async (req) => {
           }
 
           if (Array.isArray(parsed.cards)) {
-            const cards = parsed.cards.map((card, index) => ({
+            const cards = (parsed.cards as Array<{ card_index?: number; lori_id?: string | null; error?: string | null; entries?: unknown[] }>).map((card, index) => ({
               card_index: Number(card?.card_index) || index + 1,
               lori_id: card?.lori_id ?? null,
               error: card?.error ?? null,
@@ -150,12 +156,12 @@ serve(async (req) => {
         }
         console.error('GEMINI unexpected response:', JSON.stringify(result).slice(0, 500))
       } catch (geminiErr) {
-        console.error('GEMINI FAILED, falling back to Vision:', geminiErr.message)
+        console.error('GEMINI FAILED, falling back to Vision:', geminiErr instanceof Error ? geminiErr.message : 'Unknown provider error')
       }
     }
 
     // 4. Fallback engine: Google Vision raw text (frontend regex parses it)
-    const response = await fetch(
+    const result = await providerFetch('vision', 'DOCUMENT_TEXT_DETECTION',
       `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_KEY}`,
       {
         method: 'POST',
@@ -171,7 +177,6 @@ serve(async (req) => {
       }
     )
 
-    const result = await response.json()
 
     if (result.responses?.[0]?.error) {
       console.error("GOOGLE API ERROR:", result.responses[0].error.message);
@@ -185,8 +190,8 @@ serve(async (req) => {
     })
 
   } catch (error) {
-    console.error("EDGE FUNCTION CRASH:", error.message);
-    return new Response(JSON.stringify({ error: error.message }), {
+    console.error("EDGE FUNCTION CRASH:", error instanceof Error ? error.message : 'Unknown error');
+    return new Response(JSON.stringify({ error: 'Scanning failed. Please try again.' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400,
     })
